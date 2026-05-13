@@ -61,6 +61,8 @@ namespace GuestGate.Desktop
             UpdateStartEnabled();
 
             // Bootstrap عند إظهار النافذة
+            this.Height = Math.Max(this.Height, 720);
+
             this.Shown += async (_, __) =>
             {
                 if (_kidBox.Items.Count > 0) _kidBox.SelectedIndex = 0;
@@ -764,6 +766,45 @@ namespace GuestGate.Desktop
             catch (Exception ex) { SetMsg("Start failed: " + ex.Message); }
         }
 
+        private async Task SendConsentRequestAsync()
+        {
+            if (_hub == null || _hub.State != HubConnectionState.Connected)
+            { SetMsg("Hub is offline."); return; }
+
+            try
+            {
+                var language = (_consentLanguage.SelectedItem as LanguageItem)?.Code ?? "en";
+                var body = new JObject
+                {
+                    ["kid"] = _currentKid,
+                    ["guestName"] = (_consentGuestName.Text ?? string.Empty).Trim(),
+                    ["language"] = language,
+                    ["termsEn"] = (_consentTermsEn.Text ?? string.Empty).Trim(),
+                    ["termsAr"] = (_consentTermsAr.Text ?? string.Empty).Trim()
+                };
+
+                string url = _baseUrl.TrimEnd('/') + "/api/consents";
+                using (var req = new HttpRequestMessage(HttpMethod.Post, url))
+                {
+                    req.Content = new StringContent(body.ToString(Newtonsoft.Json.Formatting.None), Encoding.UTF8, "application/json");
+                    using (var res = await _http.SendAsync(req))
+                    {
+                        if (res.IsSuccessStatusCode)
+                        {
+                            var json = await res.Content.ReadAsStringAsync();
+                            var created = JObject.Parse(json);
+                            SetMsg("Approval request sent: #" + (created["id"]?.ToString() ?? ""));
+                        }
+                        else
+                        {
+                            SetMsg(string.Format("Consent request failed: {0} {1}", (int)res.StatusCode, res.ReasonPhrase));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { SetMsg("Consent request failed: " + ex.Message); }
+        }
+
         private async Task EndSessionAsync()
         {
             try
@@ -876,6 +917,14 @@ namespace GuestGate.Desktop
         {
             await DisconnectHubAsync();
             base.OnFormClosed(e);
+        }
+
+        private sealed class LanguageItem
+        {
+            public string Code { get; }
+            private readonly string _text;
+            public LanguageItem(string code, string text) { Code = code; _text = text; }
+            public override string ToString() { return _text; }
         }
 
         private sealed class TemplateItem
