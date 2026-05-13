@@ -25,11 +25,7 @@ namespace GuestGate.Desktop
         private string _selectedTemplateId = "";
         private JObject _selectedTemplateDef = new JObject();
         private int _activeSessionId = 0;
-        private TextBox _consentGuestName;
-        private ComboBox _consentLanguage;
-        private TextBox _consentTermsEn;
-        private TextBox _consentTermsAr;
-        private Button _sendConsentBtn;
+        private Button _consentBtn;
 
         // keeps references to the dynamic inputs by field key
         private readonly Dictionary<string, Control> _fieldControls =
@@ -41,7 +37,7 @@ namespace GuestGate.Desktop
         public ReceptionForm()
         {
             InitializeComponent(); // ← عناصر الواجهة من الـ Designer
-            BuildConsentPanel();
+            BuildConsentLauncherButton();
 
             // قيم افتراضية
             if (_kidBox.Items.Count == 0)
@@ -53,7 +49,7 @@ namespace GuestGate.Desktop
             _templateBox.SelectedIndexChanged += async (_, __) => await LoadTemplateAndRenderReceptionForm();
             _startBtn.Click += async (_, __) => await StartSessionAsync();
             _endBtn.Click += async (_, __) => await EndSessionAsync();
-            _sendConsentBtn.Click += async (_, __) => await SendConsentRequestAsync();
+            _consentBtn.Click += (_, __) => OpenConsentRequestForm();
             _retryTimer.Tick += async (_, __) =>
             {
                 if (_hub == null || _hub.State == HubConnectionState.Disconnected)
@@ -80,58 +76,45 @@ namespace GuestGate.Desktop
         }
 
         // =========================================================
-        // Consent approval UI
+        // Consent approval launcher
         // =========================================================
-        private void BuildConsentPanel()
+        private void BuildConsentLauncherButton()
         {
-            var box = new GroupBox();
-            box.Text = "Guest approval / terms signature";
-            box.Dock = DockStyle.Bottom;
-            box.Height = 245;
-            box.Padding = new Padding(10);
+            _consentBtn = new Button();
+            _consentBtn.Location = new Point(347, 10);
+            _consentBtn.Name = "_consentBtn";
+            _consentBtn.Size = new Size(120, 55);
+            _consentBtn.Text = "Consent form";
+            _consentBtn.UseVisualStyleBackColor = true;
+            _top.Controls.Add(_consentBtn);
 
-            var table = new TableLayoutPanel();
-            table.Dock = DockStyle.Fill;
-            table.ColumnCount = 2;
-            table.RowCount = 5;
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-            table.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-            table.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-
-            _consentGuestName = new TextBox { Dock = DockStyle.Fill };
-            _consentLanguage = new ComboBox { Dock = DockStyle.Left, Width = 140, DropDownStyle = ComboBoxStyle.DropDownList };
-            _consentLanguage.Items.Add(new LanguageItem("en", "English"));
-            _consentLanguage.Items.Add(new LanguageItem("ar", "Arabic / العربية"));
-            _consentLanguage.SelectedIndex = 0;
-            _consentTermsEn = new TextBox { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical, Text = "I confirm that I have read, understood, and agree to the hotel terms and conditions." };
-            _consentTermsAr = new TextBox { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical, Text = "أؤكد أنني قرأت وفهمت وأوافق على شروط وأحكام الفندق." };
-            _sendConsentBtn = new Button { Dock = DockStyle.Right, Width = 165, Text = "Send approval request" };
-
-            table.Controls.Add(new Label { Text = "Guest name:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
-            table.Controls.Add(_consentGuestName, 1, 0);
-            table.Controls.Add(new Label { Text = "Language:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
-            table.Controls.Add(_consentLanguage, 1, 1);
-            table.Controls.Add(new Label { Text = "Terms EN:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
-            table.Controls.Add(_consentTermsEn, 1, 2);
-            table.Controls.Add(new Label { Text = "Terms AR:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
-            table.Controls.Add(_consentTermsAr, 1, 3);
-            table.Controls.Add(_sendConsentBtn, 1, 4);
-
-            box.Controls.Add(table);
-            _prefillHost.Controls.Add(box);
-            box.BringToFront();
+            if (_top.Width < 490)
+            {
+                _top.Width = 490;
+                this.Width = Math.Max(this.Width, 510);
+            }
         }
 
-// =========================================================
+        private void OpenConsentRequestForm()
+        {
+            var form = new ConsentRequestForm(_baseUrl, () => _currentKid);
+            form.RequestSent += delegate (object sender, ConsentRequestSentEventArgs e)
+            {
+                SetMsg("Approval request sent: #" + e.RequestId);
+            };
+            form.Show(this);
+        }
+
+        // =========================================================
         // UI helpers
         // =========================================================
         private void UpdateUiEnabled(bool online)
         {
-            _top.Enabled = online; // disable full panel when offline
+            // Keep the top panel available so the standalone consent request form can be opened
+            // even when the reception hub connection is retrying.
+            _top.Enabled = true;
+            _endBtn.Enabled = online;
+            if (_consentBtn != null) _consentBtn.Enabled = true;
             _hubLbl.Text = online ? "Hub: online" : "Hub: offline";
             _hubLbl.ForeColor = online ? Color.ForestGreen : Color.Firebrick;
         }

@@ -370,8 +370,8 @@ api.MapPost("/consents", async (ConsentCreateDto body, AppDb db, IHubContext<Gue
         Kid = KID,
         GuestName = (body.guestName ?? string.Empty).Trim(),
         Language = language,
-        TermsEn = string.IsNullOrWhiteSpace(body.termsEn) ? DefaultTermsEn : body.termsEn.Trim(),
-        TermsAr = string.IsNullOrWhiteSpace(body.termsAr) ? DefaultTermsAr : body.termsAr.Trim(),
+        TermsEn = string.IsNullOrWhiteSpace(body.termsEn) ? ConsentDefaults.TermsEn : body.termsEn.Trim(),
+        TermsAr = string.IsNullOrWhiteSpace(body.termsAr) ? ConsentDefaults.TermsAr : body.termsAr.Trim(),
         Status = "waiting",
         CreatedAt = now,
         UpdatedAt = now
@@ -590,8 +590,6 @@ static Task NotifyConsentChangedAsync(IHubContext<GuestHub> hub, string kid, int
     });
 }
 
-const string DefaultTermsEn = "I confirm that I have read, understood, and agree to the hotel terms and conditions.";
-const string DefaultTermsAr = "أؤكد أنني قرأت وفهمت وأوافق على شروط وأحكام الفندق.";
 
 static string BuildScanUrl(string mobileBaseUrl, Guid editToken, string kid)
 {
