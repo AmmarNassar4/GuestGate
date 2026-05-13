@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>GuestGate — Tablet</title>
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --panel: #121829;
+            --ink: #e6eaf2;
+            --muted: #b8c0d9;
+            --stroke: #2b3551;
+            --accent: #1a2140;
+            --badge: #0b1220;
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink)
+        }
+
+        button {
+            cursor: pointer
+        }
+        /* ===== READY / SCREENSAVER ===== */
+        #screensaver {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column
+        }
+
+        .slides {
+            position: relative;
+            flex: 1;
+            overflow: hidden;
+            background: #000
+        }
+
+        .slide {
+            position: absolute;
+            inset: 0;
+            background-position: center;
+            background-size: cover;
+            opacity: 0;
+            transition: opacity .8s ease
+        }
+
+            .slide.active {
+                opacity: 1
+            }
+
+        .statusBar {
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            border-top: 1px solid rgba(255,255,255,.06);
+            background: rgba(0,0,0,.35);
+            backdrop-filter: blur(6px)
+        }
+
+        .pill {
+            border: 1px solid var(--stroke);
+            background: var(--accent);
+            color: var(--ink);
+            padding: 10px 14px;
+            border-radius: 999px
+        }
+
+        #statusPanel {
+            position: fixed;
+            left: 12px;
+            bottom: 84px;
+            background: var(--panel);
+            border: 1px solid var(--stroke);
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: none;
+            max-width: 80vw
+        }
+
+            #statusPanel pre {
+                margin: 0;
+                color: var(--muted);
+                white-space: pre-wrap
+            }
+
+        /* ===== SESSION (FORM + QR) ===== */
+        #session {
+            position: fixed;
+            inset: 0;
+            display: none;
+            padding: 24px;
+            overflow-y: auto;
+            padding-bottom: 80px
+        }
+
+        .card {
+            max-width: 880px;
+            margin: 0 auto;
+            background: var(--panel);
+            border-radius: 16px;
+            padding: 22px;
+            box-shadow: 0 10px 30px rgba(0,0,0,.25)
+        }
+
+            .card h2 {
+                margin: 0 0 8px 0
+            }
+
+        .muted {
+            color: var(--muted)
+        }
+
+        form {
+            margin-top: 10px
+        }
+
+        label {
+            display: block;
+            margin: .6rem 0 .35rem
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid var(--stroke);
+            background: var(--badge);
+            color: var(--ink)
+        }
+
+
+        .phoneHint {
+            display: block;
+            color: var(--muted);
+            font-size: 12px;
+            margin: -.15rem 0 .35rem;
+        }
+
+        .readonly {
+            opacity: .8;
+            border-style: dashed
+        }
+
+        .rowActions {
+            margin-top: 14px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap
+        }
+
+        .btn {
+            padding: 10px 16px;
+            border-radius: 10px;
+            border: 1px solid var(--stroke);
+            background: var(--accent);
+            color: var(--ink)
+        }
+
+        .danger {
+            border-color: #6b2b2b;
+            background: #3a1818
+        }
+
+        .qrBadge {
+            position: fixed;
+            top: 14px;
+            right: 14px;
+            background: var(--panel);
+            border: 1px solid var(--stroke);
+            border-radius: 12px;
+            padding: 10px;
+            width: 200px;
+            z-index: 100;
+            box-shadow: 0 8px 24px rgba(0,0,0,.25)
+        }
+
+            .qrBadge small {
+                display: block;
+                color: var(--muted);
+                margin-top: 6px
+            }
+
+        .qrBox {
+            width: 180px;
+            height: 180px;
+            background: var(--badge);
+            border-radius: 8px;
+            margin: 0 auto
+        }
+
+        .code {
+            display: block;
+            margin-top: 6px;
+            background: var(--badge);
+            padding: 6px;
+            border-radius: 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 12px;
+            color: var(--muted)
+        }
+        /* done ribbon */
+        #done {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1f7a4c;
+            color: #fff;
+            padding: 10px 14px;
+            border-radius: 999px;
+            display: none;
+            box-shadow: 0 8px 24px rgba(0,0,0,.35)
+        }
+
+        #shortLink {
+            display: none !important;
+        }
+
+        /* small screens */
+        @media(max-width:900px) {
+            .qrBadge {
+                width: 150px
+            }
+
+            .qrBox {
+                width: 130px;
+                height: 130px
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- READY: slider only + status -->
+    <section id="screensaver" aria-label="Screensaver">
+        <div class="slides" id="slides"></div>
+        <div class="statusBar">
+            <button id="statusBtn" class="pill">Status</button>
+            <span id="clock" class="pill" aria-live="polite"></span>
+        </div>
+        <div id="statusPanel"><pre id="statusText"></pre></div>
+    </section>
+
+    <!-- SESSION: dynamic inline form + small QR in corner + cancel -->
+    <section id="session" aria-label="Active session">
+        <div class="qrBadge" id="qrBadge">
+            <div id="qr" class="qrBox"></div>
+            <small>Scan to fill on your phone</small>
+            <code id="shortLink" class="code"></code>
+            <div class="rowActions" style="margin-top:8px">
+                <button id="cancelBtn" class="btn danger" title="Cancel this session">Cancel</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Guest Form</h2>
+            <p class="muted">You can fill here on the tablet, or scan the QR in the corner to fill on your phone.</p>
+            <form id="inlineForm"></form>
+        </div>
+    </section>
+
+    <div id="done">Completed ✓ Returning to Ready…</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+    <script src="/lib/qrcode.min.js"></script>
+    <script src="/lib/guestgate-phone-input.js"></script>
+    <script>
+        // fallback to local copy if CDN fails (place a copy at /lib/qrcode.min.js)
+        if (typeof window.QRCode === "undefined") {
+            var s = document.createElement('script');
+            s.src = '/lib/qrcode.min.js';
+            document.head.appendChild(s);
+        }
+    </script>
+    <script>
+        (function () {
+            // ===== config =====
+            // Defaults are overridden by /api/kiosk/screensaver when available.
+            let SLIDES = [
+                '/img/hotel/1.jpg',
+                '/img/hotel/2.jpg',
+                '/img/hotel/3.jpg'
+            ];
+            let SLIDE_MS = 8000;
+            let SCREENSAVER_ENABLED = true;
+
+            // ===== elements =====
+            const screensaver = document.getElementById('screensaver');
+            const slidesEl = document.getElementById('slides');
+            const statusBtn = document.getElementById('statusBtn');
+            const statusPanel = document.getElementById('statusPanel');
+            const statusText = document.getElementById('statusText');
+            const clock = document.getElementById('clock');
+
+            const sessionSec = document.getElementById('session');
+            const inlineForm = document.getElementById('inlineForm');
+            const cancelBtn = document.getElementById('cancelBtn');
+            const qrDiv = document.getElementById('qr');
+            const shortLink = document.getElementById('shortLink');
+            const doneRibbon = document.getElementById('done');
+
+            // ===== tablet id (kid) =====
+            const qs = new URLSearchParams(location.search);
+            let kid = qs.get('kid') || localStorage.getItem('kid');
+            if (!kid) {
+                kid = prompt('Enter Tablet ID (kid):');
+                if (!kid) return;
+                kid = String(kid).trim().toUpperCase();
+                localStorage.setItem('kid', kid);
+                location.search = '?kid=' + encodeURIComponent(kid);
+                return;
+            }
+            kid = String(kid).trim().toUpperCase();
+            localStorage.setItem('kid', kid);
+
+            // ===== state =====
+            let currentEt = null;
+            let currentSessionId = null;
+            let hub = null;
+            let sliderTimer = null;
+            let activePollTimer = null;
+            let activePollInFlight = false;
+
+            // ===== screensaver (slider) =====
+            async function loadScreensaverConfig() {
+                try {
+                    const r = await fetch('/api/kiosk/screensaver', { cache: 'no-store' });
+                    if (!r.ok) return;
+                    const cfg = await r.json();
+                    SCREENSAVER_ENABLED = cfg.enabled !== false;
+                    if (Array.isArray(cfg.images) && cfg.images.length) SLIDES = cfg.images;
+                    if (Number.isFinite(Number(cfg.interval))) SLIDE_MS = Math.max(1000, Number(cfg.interval));
+                } catch {
+                    // keep local defaults
+                }
+            }
+
+            function runClock() {
+                if (!clock) return;
+                const fmt = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'medium' });
+                const tick = () => { clock.textContent = fmt.format(new Date()); };
+                tick();
+                setInterval(tick, 1000);
+            }
+
+            async function requestWakeLock() {
+                try {
+                    if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
+                } catch {
+                    // Wake Lock may be unavailable or blocked; kiosk still works.
+                }
+            }
+
+            function buildSlides() {
+                slidesEl.innerHTML = '';
+                if (!SCREENSAVER_ENABLED) {
+                    const fallback = document.createElement('div');
+                    fallback.className = 'slide active';
+                    fallback.style.background = 'linear-gradient(120deg,#0b0f19,#121829)';
+                    slidesEl.appendChild(fallback);
+                    return;
+                }
+                if (!SLIDES || !SLIDES.length) {
+                    const fallback = document.createElement('div');
+                    fallback.className = 'slide active';
+                    fallback.style.background = 'linear-gradient(120deg,#0b0f19,#121829)';
+                    slidesEl.appendChild(fallback);
+                    return;
+                }
+                SLIDES.forEach((url, i) => {
+                    const d = document.createElement('div');
+                    d.className = 'slide' + (i === 0 ? ' active' : '');
+                    d.style.backgroundImage = 'url("' + url + '")';
+                    slidesEl.appendChild(d);
+                });
+                let idx = 0;
+                sliderTimer && clearInterval(sliderTimer);
+                sliderTimer = setInterval(() => {
+                    const all = slidesEl.querySelectorAll('.slide');
+                    all.forEach(e => e.classList.remove('active'));
+                    idx = (idx + 1) % all.length;
+                    all[idx].classList.add('active');
+                }, SLIDE_MS);
+            }
+
+            // ===== status =====
+            function setStatus() {
+                statusText.textContent = [
+                    'Tablet (kid): ' + kid,
+                    'SignalR: ' + (hub ? hub.state : 'not-connected'),
+                    'Active sessionId: ' + (currentSessionId ?? '—'),
+                    'EditToken: ' + (currentEt ?? '—')
+                ].join('\n');
+            }
+            statusBtn.onclick = () => { setStatus(); statusPanel.style.display = (statusPanel.style.display === 'block' ? 'none' : 'block'); };
+
+            // ===== views =====
+            function showReady() {
+                // clear session state
+                currentEt = null; currentSessionId = null;
+                sessionSec.style.display = 'none';
+                doneRibbon.style.display = 'none';
+                screensaver.style.display = 'flex';
+                buildSlides();
+                setStatus();
+            }
+
+            function showSession(scanUrl, et, sessionId) {
+                currentEt = et;
+                currentSessionId = sessionId || currentSessionId;
+
+                // 1) show the session view first (so the QR box has size)
+                screensaver.style.display = 'none';
+                statusPanel.style.display = 'none';
+                sessionSec.style.display = 'block';
+                doneRibbon.style.display = 'none';
+
+                // 2) render the inline form
+                renderInlineForm().catch(console.error);
+
+                // 3) render QR robustly (with fallback size and a retry)
+                renderQr(scanUrl);
+
+                shortLink.textContent = scanUrl;
+                setStatus();
+            }
+
+            // Draw QR with a safe size and retry if needed
+            function renderQr(scanUrl) {
+                // clear any previous QR
+                qrDiv.innerHTML = '';
+
+                // compute size AFTER visible; fallback to 180
+                var rect = qrDiv.getBoundingClientRect();
+                var size = Math.max(140, Math.floor(Math.min(rect.width || 0, rect.height || 0) || 180));
+
+                // also set explicit CSS size to be safe
+                qrDiv.style.width = size + 'px';
+                qrDiv.style.height = size + 'px';
+
+                // if library is not loaded yet, try shortly
+                if (!window.QRCode) {
+                    console.warn('QRCode library not yet loaded; retrying…');
+                    setTimeout(function () { renderQr(scanUrl); }, 80);
+                    return;
+                }
+
+                // draw
+                new QRCode(qrDiv, {
+                    text: String(scanUrl || ''),
+                    width: size,
+                    height: size,
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+
+                // if it drew an empty image (data:,), retry once after a tick
+                setTimeout(function () {
+                    var img = qrDiv.querySelector('img');
+                    if (img && img.src === 'data:,') {
+                        console.warn('Empty QR image detected; forcing redraw with fixed size.');
+                        qrDiv.innerHTML = '';
+                        new QRCode(qrDiv, {
+                            text: String(scanUrl || ''),
+                            width: 180,
+                            height: 180,
+                            correctLevel: QRCode.CorrectLevel.M
+                        });
+                    }
+                }, 50);
+            }
+
+            // optional: re-render QR on window resize (keeps it sharp in rotations etc.)
+            window.addEventListener('resize', function () {
+                if (sessionSec.style.display === 'block' && currentEt && shortLink.textContent) {
+                    renderQr(shortLink.textContent);
+                }
+            });
+
+            function showCompletedThenReady() {
+                doneRibbon.style.display = 'block';
+                setTimeout(() => showReady(), 1800);
+            }
+
+            // ===== data =====
+            async function getActiveSession() {
+                const r = await fetch(`/api/sessions/active?kid=${encodeURIComponent(kid)}`, { cache: 'no-store' });
+                if (r.status === 200) return r.json();
+                return null;
+            }
+
+            async function checkActiveSession(force) {
+                if (activePollInFlight) return false;
+                activePollInFlight = true;
+                try {
+                    const s = await getActiveSession();
+                    if (s && s.et) {
+                        if (force || !currentEt || String(currentEt).toLowerCase() !== String(s.et).toLowerCase()) {
+                            showSession(s.scanUrl, s.et, s.sessionId);
+                        }
+                        return true;
+                    }
+                    if (currentEt) showReady();
+                    return false;
+                } catch (err) {
+                    console.warn('active-session check failed', err);
+                    return false;
+                } finally {
+                    activePollInFlight = false;
+                }
+            }
+
+            function startActivePolling() {
+                if (activePollTimer) clearInterval(activePollTimer);
+                activePollTimer = setInterval(() => {
+                    checkActiveSession(false);
+                }, 1000);
+            }
+
+            function fieldKey(field) {
+                return String((field && (field.key || field.name || field.id)) || '');
+            }
+
+            function fieldLabel(field) {
+                return String((field && (field.label || field.title || fieldKey(field))) || '');
+            }
+
+            function isPhoneField(field) {
+                if (window.GuestGatePhone) return window.GuestGatePhone.isPhoneField(field);
+                const dt = String((field && field.dataType) || '').toLowerCase();
+                const text = [fieldKey(field), fieldLabel(field), dt].join(' ').toLowerCase();
+                return ['phone', 'tel', 'telephone', 'mobile'].includes(dt)
+                    || ['mobile', 'phone', 'tel', 'جوال', 'موبايل', 'هاتف', 'تليفون', 'تلفون'].some(k => text.includes(k));
+            }
+
+            async function renderInlineForm() {
+                inlineForm.innerHTML = '';
+                let r = await fetch(`/tablet/${encodeURIComponent(kid)}/form-config`, { cache: 'no-store' });
+                if (!r.ok) {
+                    // The session may have been created milliseconds before this request; retry once.
+                    await new Promise(resolve => setTimeout(resolve, 250));
+                    r = await fetch(`/tablet/${encodeURIComponent(kid)}/form-config`, { cache: 'no-store' });
+                }
+                if (!r.ok) { console.warn('form-config not available'); return; }
+                const cfg = await r.json(); // { templateId, template, prefill }
+                const template = cfg.template || {};
+                const prefill = cfg.prefill || {};
+                const fields = (template.fields || [])
+                    .filter(f => !f.scope || f.scope === 'StartForm')
+                    .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+                function buildInput(f) {
+                    const dt = (f.dataType || 'Text').toLowerCase();
+                    let input;
+                    if (dt === 'enum') {
+                        input = document.createElement('select');
+                        const opts = Array.isArray(f.options) ? f.options : [];
+                        for (const o of opts) {
+                            let val, text;
+                            if (typeof o === 'string') { val = o; text = o; }
+                            else { val = o.value ?? o.key ?? o.id ?? o.text; text = o.label ?? o.text ?? val; }
+                            const opt = document.createElement('option'); opt.value = val ?? ''; opt.textContent = text ?? '';
+                            input.appendChild(opt);
+                        }
+                    } else if (dt === 'textarea' || dt === 'multiline' || dt === 'notes') {
+                        input = document.createElement('textarea');
+                        input.rows = 4;
+                    } else {
+                        input = document.createElement('input');
+                        input.type = ({ text: 'text', number: 'number', date: 'date', email: 'email', phone: 'tel', tel: 'tel', mobile: 'tel', idnumber: 'text' }[dt]) || 'text';
+                        if (input.type === 'tel') input.inputMode = 'tel';
+                        if (input.type === 'email') input.inputMode = 'email';
+                        if (f.validation) {
+                            if (f.validation.minLength) input.minLength = f.validation.minLength;
+                            if (f.validation.maxLength) input.maxLength = f.validation.maxLength;
+                            if (f.validation.regex) input.pattern = f.validation.regex;
+                        }
+                    }
+                    return input;
+                }
+
+                for (const f of fields) {
+                    const key = fieldKey(f);
+                    const labelText = fieldLabel(f);
+                    const editable = !f.guest || f.guest.editable !== false;
+                    const required = !!(f.guest && f.guest.required);
+                    const v = (prefill[key] !== undefined && prefill[key] !== null) ? prefill[key] : (f.defaultValue ?? '');
+
+                    const label = document.createElement('label');
+                    label.textContent = labelText || key;
+                    if (required) label.textContent += ' *';
+
+                    let input;
+                    if (isPhoneField(f) && window.GuestGatePhone) {
+                        input = window.GuestGatePhone.createInput(f, v, {
+                            key,
+                            required,
+                            readOnly: !editable,
+                            className: '',
+                            placeholder: f.placeholder || 'Mobile number'
+                        });
+                    } else {
+                        input = buildInput(f);
+                        input.name = key;
+                        input.dataset.field = key;
+                        if (!editable) { if (input.tagName === 'SELECT') input.disabled = true; else input.readOnly = true; input.classList.add('readonly'); }
+                        if (required) input.required = true;
+                        if (v !== undefined && v !== null) input.value = v;
+                    }
+
+                    inlineForm.appendChild(label);
+                    inlineForm.appendChild(input);
+
+                    if (input.dataset.guestgatePhone === '1') {
+                        const hint = document.createElement('small');
+                        hint.className = 'phoneHint';
+                        hint.textContent = 'Select the country or enter the number; it will be saved in international format.';
+                        inlineForm.appendChild(hint);
+                    }
+                }
+
+                const actions = document.createElement('div');
+                actions.className = 'rowActions';
+                const submit = document.createElement('button');
+                submit.id = 'submitBtn';
+                submit.className = 'btn';
+                submit.type = 'submit';
+                submit.textContent = 'Submit';
+                actions.appendChild(submit);
+                inlineForm.appendChild(actions);
+            }
+
+            // ===== actions =====
+            inlineForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (!currentEt) { alert('No active session.'); return; }
+                if (window.GuestGatePhone && !(await window.GuestGatePhone.validateForm(inlineForm))) return;
+
+                const data = {};
+                inlineForm.querySelectorAll('[data-field]').forEach(el => {
+                    let v;
+                    if (window.GuestGatePhone && el.dataset.guestgatePhone === '1') v = window.GuestGatePhone.getValue(el);
+                    else {
+                        v = (el.value ?? '').toString().trim();
+                        if (el.type === 'date' && v === '') v = null;
+                    }
+                    data[el.dataset.field] = v;
+                });
+
+                const res = await fetch('/api/mobile/save', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ et: currentEt, data })
+                });
+                if (res.ok) { showCompletedThenReady(); }
+                else if (res.status === 410) { alert('Session expired.'); showReady(); }
+                else { let err = ''; try { err = (await res.json()).error || ''; } catch { } alert('Error: ' + (err || res.status)); }
+            });
+
+            cancelBtn.onclick = async () => {
+                await fetch(`/api/sessions/active?kid=${encodeURIComponent(kid)}`, { method: 'DELETE' });
+                showReady();
+            };
+
+            // ===== SignalR =====
+            if (window.signalR) {
+                hub = new signalR.HubConnectionBuilder()
+                    .withUrl(`/hubs/guest?kid=${encodeURIComponent(kid)}`)
+                    .withAutomaticReconnect()
+                    .build();
+
+                // desktop app started a new session
+                hub.on('sessionStarted', p => {
+                    const scanUrl = p.scanUrl;
+                    const et = p.et;
+                    const sid = p.sessionId;
+                    if (scanUrl && et) showSession(scanUrl, et, sid);
+                    else checkActiveSession(true);
+                });
+
+                // desktop cancelled/ended the current session
+                hub.on('sessionEnded', p => {
+                    showReady();
+                });
+
+                // guest finished (mobile or otherwise)
+                hub.on('sessionCompleted', p => {
+                    showCompletedThenReady();
+                });
+
+                hub.onreconnected(() => checkActiveSession(true));
+                hub.onclose(() => setTimeout(() => checkActiveSession(true), 500));
+
+                hub.start()
+                    .then(() => checkActiveSession(true))
+                    .catch(() => setTimeout(() => checkActiveSession(true), 500));
+            }
+
+            // ===== boot =====
+            (async function init() {
+                runClock();
+                requestWakeLock();
+                await loadScreensaverConfig();
+                buildSlides(); // always show slider initially
+                if (!await checkActiveSession(true)) showReady();
+                startActivePolling();
+            })();
+
+        })();
+    </script>
+</body>
+</html>
