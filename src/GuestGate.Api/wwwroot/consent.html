@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GuestGate — Consent</title>
+  <style>
+    :root { --bg:#0b0f19; --panel:#121829; --ink:#e6eaf2; --muted:#b8c0d9; --stroke:#2b3551; --accent:#1a2140; --ok:#1f7a4c; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    #ready{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;background:radial-gradient(circle at center,#17213b 0,#0b0f19 60%)}
+    .readyCard,.card{background:rgba(18,24,41,.94);border:1px solid var(--stroke);border-radius:22px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+    .readyCard{max-width:720px}.readyCard h1{font-size:44px;margin:0 0 10px}.muted{color:var(--muted)}
+    #consent{display:none;min-height:100vh;padding:28px}.card{max-width:980px;margin:0 auto}.top{display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    h1{margin:0 0 6px}.guest{font-size:22px}.lang{display:flex;align-items:center;gap:8px}select,button{border-radius:12px;border:1px solid var(--stroke);background:var(--accent);color:var(--ink);padding:10px 14px;font-size:16px}button:disabled{opacity:.5;cursor:not-allowed}
+    .terms{margin-top:22px;white-space:pre-wrap;line-height:1.65;background:#0b1220;border:1px solid var(--stroke);border-radius:14px;padding:18px;max-height:36vh;overflow:auto;font-size:18px}.rtl{direction:rtl;text-align:right}
+    .agree{display:flex;gap:12px;align-items:flex-start;margin:22px 0;font-size:18px}.agree input{width:24px;height:24px;accent-color:var(--ok)}
+    canvas{display:block;width:100%;height:220px;background:white;border-radius:14px;border:2px solid var(--stroke);touch-action:none}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px}.primary{background:var(--ok);border-color:#37a66c}.danger{background:#3a1818;border-color:#6b2b2b}.message{min-height:24px;margin-top:14px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <section id="ready">
+    <div class="readyCard">
+      <h1>GuestGate Consent</h1>
+      <p class="muted">Waiting for an approval request from reception…</p>
+      <p class="muted" id="kidLabel"></p>
+    </div>
+  </section>
+
+  <main id="consent">
+    <div class="card">
+      <div class="top">
+        <div>
+          <h1 id="title">Terms and Conditions</h1>
+          <div class="guest" id="guestName"></div>
+        </div>
+        <label class="lang">Language
+          <select id="language">
+            <option value="en">English</option>
+            <option value="ar">العربية</option>
+          </select>
+        </label>
+      </div>
+      <div id="terms" class="terms"></div>
+      <label class="agree"><input id="accepted" type="checkbox" /> <span id="acceptText">I have read and agree to the terms and conditions.</span></label>
+      <h2 id="signTitle">Signature</h2>
+      <canvas id="signature" width="1200" height="360"></canvas>
+      <div class="actions">
+        <button class="danger" id="clearBtn" type="button">Clear signature</button>
+        <button class="primary" id="submitBtn" type="button">Submit signed consent</button>
+      </div>
+      <div class="message" id="message"></div>
+    </div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+  <script>
+  (() => {
+    const params = new URLSearchParams(location.search);
+    const kid = (params.get('kid') || localStorage.getItem('guestgate.kid') || 'K1').trim().toUpperCase();
+    localStorage.setItem('guestgate.kid', kid);
+    const ready = document.getElementById('ready'), consent = document.getElementById('consent'), kidLabel = document.getElementById('kidLabel');
+    const language = document.getElementById('language'), terms = document.getElementById('terms'), accepted = document.getElementById('accepted');
+    const guestName = document.getElementById('guestName'), title = document.getElementById('title'), acceptText = document.getElementById('acceptText'), signTitle = document.getElementById('signTitle');
+    const clearBtn = document.getElementById('clearBtn'), submitBtn = document.getElementById('submitBtn'), message = document.getElementById('message');
+    const canvas = document.getElementById('signature'), ctx = canvas.getContext('2d');
+    let request = null, drawing = false, hasSignature = false;
+    kidLabel.textContent = `Kiosk: ${kid}`;
+
+    function showReady(){ request=null; ready.style.display='flex'; consent.style.display='none'; accepted.checked=false; clearSignature(); message.textContent=''; }
+    function showConsent(data){ request=data; language.value=(data.language || 'en').toLowerCase()==='ar'?'ar':'en'; ready.style.display='none'; consent.style.display='block'; accepted.checked=false; clearSignature(); renderLanguage(); }
+    function renderLanguage(){ const ar = language.value === 'ar'; document.documentElement.lang = ar ? 'ar' : 'en'; document.body.classList.toggle('rtl', ar); terms.classList.toggle('rtl', ar); title.textContent = ar ? 'الشروط والأحكام' : 'Terms and Conditions'; signTitle.textContent = ar ? 'التوقيع' : 'Signature'; acceptText.textContent = ar ? 'قرأت وأوافق على الشروط والأحكام.' : 'I have read and agree to the terms and conditions.'; guestName.textContent = request && request.guestName ? (ar ? `الضيف: ${request.guestName}` : `Guest: ${request.guestName}`) : ''; terms.textContent = request ? (ar ? (request.termsAr || request.termsEn || '') : (request.termsEn || request.termsAr || '')) : ''; clearBtn.textContent = ar ? 'مسح التوقيع' : 'Clear signature'; submitBtn.textContent = ar ? 'إرسال الموافقة الموقعة' : 'Submit signed consent'; }
+    language.addEventListener('change', renderLanguage);
+
+    function clearSignature(){ ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.strokeStyle='#111'; ctx.lineWidth=5; ctx.lineCap='round'; ctx.lineJoin='round'; hasSignature=false; }
+    function point(e){ const r=canvas.getBoundingClientRect(); const t=e.touches&&e.touches[0] ? e.touches[0] : e; return { x:(t.clientX-r.left)*(canvas.width/r.width), y:(t.clientY-r.top)*(canvas.height/r.height) }; }
+    function start(e){ e.preventDefault(); drawing=true; hasSignature=true; const p=point(e); ctx.beginPath(); ctx.moveTo(p.x,p.y); }
+    function move(e){ if(!drawing)return; e.preventDefault(); const p=point(e); ctx.lineTo(p.x,p.y); ctx.stroke(); }
+    function end(e){ if(drawing){ e.preventDefault(); drawing=false; } }
+    canvas.addEventListener('pointerdown', start); canvas.addEventListener('pointermove', move); canvas.addEventListener('pointerup', end); canvas.addEventListener('pointerleave', end); canvas.addEventListener('touchstart', start, {passive:false}); canvas.addEventListener('touchmove', move, {passive:false}); canvas.addEventListener('touchend', end, {passive:false});
+    clearBtn.onclick = clearSignature;
+
+    async function checkActive(silent){ try { const res = await fetch(`/api/consents/active?kid=${encodeURIComponent(kid)}`, { cache:'no-store' }); if(res.status===204){ showReady(); return false; } if(res.ok){ showConsent(await res.json()); return true; } if(!silent) message.textContent = `Error ${res.status}`; } catch(e){ if(!silent) message.textContent=e.message; } return false; }
+    submitBtn.onclick = async () => { if(!request) return; if(!accepted.checked){ alert(language.value==='ar'?'يجب الموافقة على الشروط أولاً.':'Please accept the terms first.'); return; } if(!hasSignature){ alert(language.value==='ar'?'يرجى التوقيع أولاً.':'Please sign first.'); return; } submitBtn.disabled=true; message.textContent = language.value==='ar'?'جارٍ الحفظ...':'Saving...'; try { const res = await fetch(`/api/consents/${request.id}/sign`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accepted:true, signatureImage: canvas.toDataURL('image/jpeg', .9) }) }); if(res.ok){ message.textContent = language.value==='ar'?'تم الحفظ.':'Saved.'; setTimeout(showReady, 1400); } else { const err = await res.json().catch(()=>({})); alert(err.error || `Error ${res.status}`); } } finally { submitBtn.disabled=false; } };
+
+    if (window.signalR) {
+      const hub = new signalR.HubConnectionBuilder().withUrl(`/hubs/guest?kid=${encodeURIComponent(kid)}`).withAutomaticReconnect().build();
+      hub.on('consentChanged', () => checkActive(true));
+      hub.onreconnected(() => checkActive(true));
+      hub.start().then(()=>checkActive(true)).catch(()=>setTimeout(()=>checkActive(true), 1000));
+    }
+    checkActive(true); setInterval(()=>checkActive(true), 5000);
+  })();
+  </script>
+</body>
+</html>
