@@ -25,6 +25,7 @@ namespace GuestGate.Desktop
         private string _selectedTemplateId = "";
         private JObject _selectedTemplateDef = new JObject();
         private int _activeSessionId = 0;
+        private Button _consentBtn;
 
         // keeps references to the dynamic inputs by field key
         private readonly Dictionary<string, Control> _fieldControls =
@@ -36,6 +37,7 @@ namespace GuestGate.Desktop
         public ReceptionForm()
         {
             InitializeComponent(); // ← عناصر الواجهة من الـ Designer
+            BuildConsentLauncherButton();
 
             // قيم افتراضية
             if (_kidBox.Items.Count == 0)
@@ -47,6 +49,7 @@ namespace GuestGate.Desktop
             _templateBox.SelectedIndexChanged += async (_, __) => await LoadTemplateAndRenderReceptionForm();
             _startBtn.Click += async (_, __) => await StartSessionAsync();
             _endBtn.Click += async (_, __) => await EndSessionAsync();
+            _consentBtn.Click += (_, __) => OpenConsentRequestForm();
             _retryTimer.Tick += async (_, __) =>
             {
                 if (_hub == null || _hub.State == HubConnectionState.Disconnected)
@@ -71,11 +74,45 @@ namespace GuestGate.Desktop
         }
 
         // =========================================================
+        // Consent approval launcher
+        // =========================================================
+        private void BuildConsentLauncherButton()
+        {
+            _consentBtn = new Button();
+            _consentBtn.Location = new Point(347, 10);
+            _consentBtn.Name = "_consentBtn";
+            _consentBtn.Size = new Size(120, 55);
+            _consentBtn.Text = "Consent form";
+            _consentBtn.UseVisualStyleBackColor = true;
+            _top.Controls.Add(_consentBtn);
+
+            if (_top.Width < 490)
+            {
+                _top.Width = 490;
+                this.Width = Math.Max(this.Width, 510);
+            }
+        }
+
+        private void OpenConsentRequestForm()
+        {
+            var form = new ConsentRequestForm(_baseUrl, () => _currentKid);
+            form.RequestSent += delegate (object sender, ConsentRequestSentEventArgs e)
+            {
+                SetMsg("Approval request sent: #" + e.RequestId);
+            };
+            form.Show(this);
+        }
+
+        // =========================================================
         // UI helpers
         // =========================================================
         private void UpdateUiEnabled(bool online)
         {
-            _top.Enabled = online; // disable full panel when offline
+            // Keep the top panel available so the standalone consent request form can be opened
+            // even when the reception hub connection is retrying.
+            _top.Enabled = true;
+            _endBtn.Enabled = online;
+            if (_consentBtn != null) _consentBtn.Enabled = true;
             _hubLbl.Text = online ? "Hub: online" : "Hub: offline";
             _hubLbl.ForeColor = online ? Color.ForestGreen : Color.Firebrick;
         }
@@ -578,6 +615,19 @@ namespace GuestGate.Desktop
                             }
                         }
                         BeginInvoke(new Action(delegate { SetMsg("sessionStarted."); }));
+                    }
+                    catch { }
+                });
+
+                _hub.On<object>("consentChanged", delegate (object p)
+                {
+                    try
+                    {
+                        var token = p as JToken ?? JToken.FromObject(p);
+                        BeginInvoke(new Action(delegate
+                        {
+                            SetMsg("consentChanged: #" + (token["consentId"]?.ToString() ?? "") + " " + (token["status"]?.ToString() ?? ""));
+                        }));
                     }
                     catch { }
                 });

@@ -10,11 +10,17 @@ namespace GuestGate.Api.Data
         public DbSet<Template> Templates => Set<Template>();
         public DbSet<Guest> Guests => Set<Guest>();
         public DbSet<KioskSession> KioskSessions => Set<KioskSession>();
+        public DbSet<ConsentRequest> ConsentRequests => Set<ConsentRequest>();
         protected override void OnModelCreating(ModelBuilder b)
         {
             b.Entity<Template>().HasKey(t => t.Id);
             b.Entity<KioskSession>().HasIndex(x => x.EditToken).IsUnique();
             b.Entity<KioskSession>().HasIndex(x => new { x.Kid, x.Status });
+            b.Entity<ConsentRequest>().HasIndex(x => new { x.Kid, x.Status });
+            b.Entity<ConsentRequest>().Property(x => x.GuestName).HasMaxLength(200);
+            b.Entity<ConsentRequest>().Property(x => x.Kid).HasMaxLength(50);
+            b.Entity<ConsentRequest>().Property(x => x.Language).HasMaxLength(5);
+            b.Entity<ConsentRequest>().Property(x => x.Status).HasMaxLength(20);
         }
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -37,6 +43,10 @@ namespace GuestGate.Api.Data
                         case KioskSession ks:
                             if (e.State == EntityState.Added && ks.CreatedAt == default) ks.CreatedAt = now;
                             ks.UpdatedAt = now;
+                            break;
+                        case ConsentRequest cr:
+                            if (e.State == EntityState.Added && cr.CreatedAt == default) cr.CreatedAt = now;
+                            cr.UpdatedAt = now;
                             break;
                     }
                 }
