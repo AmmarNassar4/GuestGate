@@ -82,6 +82,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDb>();
     await db.Database.EnsureCreatedAsync();
+    await EnsureConsentRequestsTableAsync(db);
 }
 
 app.UseSwagger();
@@ -89,7 +90,7 @@ app.UseSwaggerUI();
 app.UseCors();
 app.UseDefaultFiles();
 app.UseStaticFiles();
-app.MapGet("/consent", () => Results.Redirect("/consent.html"));
+app.MapGet("/consent", (HttpContext http) => Results.Redirect("/index.html" + http.Request.QueryString));
 
 app.MapGet("/diag/health", (IConfiguration cfg) => Results.Ok(new
 {
@@ -416,6 +417,7 @@ api.MapPost("/consents/{id:int}/sign", async (int id, ConsentSignDto body, AppDb
     if (request.Status == "signed") return Results.Conflict(new { error = "Consent request is already signed", pdfPath = request.PdfPath });
 
     request.Accepted = true;
+    request.Language = NormalizeConsentLanguage(body.language ?? request.Language);
     request.SignatureImageDataUrl = body.signatureImage;
     request.SignedAt = DateTime.UtcNow;
     request.Status = "signed";
@@ -556,6 +558,36 @@ api.MapPost("/mobile/save", async (MobileSaveDto body, AppDb db, IHubContext<Gue
 app.Run();
 
 
+
+static async Task EnsureConsentRequestsTableAsync(AppDb db)
+{
+    if (db.Database.IsSqlServer())
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID(N'[dbo].[ConsentRequests]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[ConsentRequests]
+    (
+        [Id] int IDENTITY(1,1) NOT NULL CONSTRAINT [PK_ConsentRequests] PRIMARY KEY,
+        [Kid] nvarchar(50) NOT NULL,
+        [GuestName] nvarchar(200) NOT NULL CONSTRAINT [DF_ConsentRequests_GuestName] DEFAULT N'',
+        [Language] nvarchar(5) NOT NULL CONSTRAINT [DF_ConsentRequests_Language] DEFAULT N'en',
+        [TermsEn] nvarchar(max) NOT NULL CONSTRAINT [DF_ConsentRequests_TermsEn] DEFAULT N'',
+        [TermsAr] nvarchar(max) NOT NULL CONSTRAINT [DF_ConsentRequests_TermsAr] DEFAULT N'',
+        [Status] nvarchar(20) NOT NULL CONSTRAINT [DF_ConsentRequests_Status] DEFAULT N'waiting',
+        [Accepted] bit NOT NULL CONSTRAINT [DF_ConsentRequests_Accepted] DEFAULT CONVERT(bit, 0),
+        [SignatureImageDataUrl] nvarchar(max) NULL,
+        [PdfPath] nvarchar(max) NULL,
+        [SignedAt] datetime2 NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [UpdatedAt] datetime2 NOT NULL
+    );
+
+    CREATE INDEX [IX_ConsentRequests_Kid_Status] ON [dbo].[ConsentRequests] ([Kid], [Status]);
+END
+");
+    }
+}
 
 static string NormalizeConsentLanguage(string? language)
 {

@@ -229,6 +229,90 @@
             display: none !important;
         }
 
+
+        /* ===== CONSENT APPROVAL ===== */
+        #consentApproval {
+            position: fixed;
+            inset: 0;
+            display: none;
+            padding: 28px;
+            overflow-y: auto;
+            padding-bottom: 80px;
+        }
+
+        .consentTop {
+            display: flex;
+            gap: 18px;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+
+        .guestName {
+            font-size: 22px;
+            color: var(--muted);
+        }
+
+        .languagePicker {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 220px;
+        }
+
+        #consentTerms {
+            margin-top: 22px;
+            white-space: pre-wrap;
+            line-height: 1.65;
+            background: var(--badge);
+            border: 1px solid var(--stroke);
+            border-radius: 14px;
+            padding: 18px;
+            max-height: 36vh;
+            overflow: auto;
+            font-size: 18px;
+        }
+
+        .rtlText {
+            direction: rtl;
+            text-align: right;
+        }
+
+        .agreeRow {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            margin: 22px 0;
+            font-size: 18px;
+        }
+
+        .agreeRow input {
+            width: 24px;
+            height: 24px;
+            accent-color: #1f7a4c;
+        }
+
+        #signatureCanvas {
+            display: block;
+            width: 100%;
+            height: 220px;
+            background: #fff;
+            border-radius: 14px;
+            border: 2px solid var(--stroke);
+            touch-action: none;
+        }
+
+        .primary {
+            background: #1f7a4c;
+            border-color: #37a66c;
+        }
+
+        .message {
+            min-height: 24px;
+            margin-top: 14px;
+            color: var(--muted);
+        }
+
         /* small screens */
         @media(max-width:900px) {
             .qrBadge {
@@ -268,6 +352,34 @@
             <h2>Guest Form</h2>
             <p class="muted">You can fill here on the tablet, or scan the QR in the corner to fill on your phone.</p>
             <form id="inlineForm"></form>
+        </div>
+    </section>
+
+
+    <!-- CONSENT: approval request with terms, checkbox, and touch signature -->
+    <section id="consentApproval" aria-label="Consent approval">
+        <div class="card">
+            <div class="consentTop">
+                <div>
+                    <h2 id="consentTitle">Terms and Conditions</h2>
+                    <div class="guestName" id="consentGuestName"></div>
+                </div>
+                <label class="languagePicker">Language
+                    <select id="consentLanguage">
+                        <option value="en">English</option>
+                        <option value="ar">العربية</option>
+                    </select>
+                </label>
+            </div>
+            <div id="consentTerms"></div>
+            <label class="agreeRow"><input id="consentAccepted" type="checkbox" /> <span id="consentAcceptText">I have read and agree to the terms and conditions.</span></label>
+            <h2 id="signatureTitle">Signature</h2>
+            <canvas id="signatureCanvas" width="1200" height="360"></canvas>
+            <div class="rowActions">
+                <button class="btn danger" id="clearSignatureBtn" type="button">Clear signature</button>
+                <button class="btn primary" id="submitConsentBtn" type="button">Submit signed consent</button>
+            </div>
+            <div class="message" id="consentMessage"></div>
         </div>
     </section>
 
@@ -311,6 +423,20 @@
             const shortLink = document.getElementById('shortLink');
             const doneRibbon = document.getElementById('done');
 
+            const consentApproval = document.getElementById('consentApproval');
+            const consentLanguage = document.getElementById('consentLanguage');
+            const consentTerms = document.getElementById('consentTerms');
+            const consentAccepted = document.getElementById('consentAccepted');
+            const consentGuestName = document.getElementById('consentGuestName');
+            const consentTitle = document.getElementById('consentTitle');
+            const consentAcceptText = document.getElementById('consentAcceptText');
+            const signatureTitle = document.getElementById('signatureTitle');
+            const clearSignatureBtn = document.getElementById('clearSignatureBtn');
+            const submitConsentBtn = document.getElementById('submitConsentBtn');
+            const consentMessage = document.getElementById('consentMessage');
+            const signatureCanvas = document.getElementById('signatureCanvas');
+            const signatureCtx = signatureCanvas.getContext('2d');
+
             // ===== tablet id (kid) =====
             const qs = new URLSearchParams(location.search);
             let kid = qs.get('kid') || localStorage.getItem('kid');
@@ -332,6 +458,10 @@
             let sliderTimer = null;
             let activePollTimer = null;
             let activePollInFlight = false;
+            let currentConsent = null;
+            let consentPollInFlight = false;
+            let drawingSignature = false;
+            let hasSignature = false;
 
             // ===== screensaver (slider) =====
             async function loadScreensaverConfig() {
@@ -401,7 +531,8 @@
                     'Tablet (kid): ' + kid,
                     'SignalR: ' + (hub ? hub.state : 'not-connected'),
                     'Active sessionId: ' + (currentSessionId ?? '—'),
-                    'EditToken: ' + (currentEt ?? '—')
+                    'EditToken: ' + (currentEt ?? '—'),
+                    'Consent requestId: ' + (currentConsent ? currentConsent.id : '—')
                 ].join('\n');
             }
             statusBtn.onclick = () => { setStatus(); statusPanel.style.display = (statusPanel.style.display === 'block' ? 'none' : 'block'); };
@@ -409,8 +540,9 @@
             // ===== views =====
             function showReady() {
                 // clear session state
-                currentEt = null; currentSessionId = null;
+                currentEt = null; currentSessionId = null; currentConsent = null;
                 sessionSec.style.display = 'none';
+                consentApproval.style.display = 'none';
                 doneRibbon.style.display = 'none';
                 screensaver.style.display = 'flex';
                 buildSlides();
@@ -422,8 +554,10 @@
                 currentSessionId = sessionId || currentSessionId;
 
                 // 1) show the session view first (so the QR box has size)
+                if (currentConsent) return;
                 screensaver.style.display = 'none';
                 statusPanel.style.display = 'none';
+                consentApproval.style.display = 'none';
                 sessionSec.style.display = 'block';
                 doneRibbon.style.display = 'none';
 
@@ -493,6 +627,138 @@
                 setTimeout(() => showReady(), 1800);
             }
 
+            // ===== consent approval =====
+            function clearSignature() {
+                signatureCtx.fillStyle = '#fff';
+                signatureCtx.fillRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+                signatureCtx.strokeStyle = '#111';
+                signatureCtx.lineWidth = 5;
+                signatureCtx.lineCap = 'round';
+                signatureCtx.lineJoin = 'round';
+                hasSignature = false;
+            }
+
+            function signaturePoint(e) {
+                const r = signatureCanvas.getBoundingClientRect();
+                const t = e.touches && e.touches[0] ? e.touches[0] : e;
+                return {
+                    x: (t.clientX - r.left) * (signatureCanvas.width / r.width),
+                    y: (t.clientY - r.top) * (signatureCanvas.height / r.height)
+                };
+            }
+
+            function startSignature(e) {
+                e.preventDefault();
+                drawingSignature = true;
+                hasSignature = true;
+                const p = signaturePoint(e);
+                signatureCtx.beginPath();
+                signatureCtx.moveTo(p.x, p.y);
+            }
+
+            function moveSignature(e) {
+                if (!drawingSignature) return;
+                e.preventDefault();
+                const p = signaturePoint(e);
+                signatureCtx.lineTo(p.x, p.y);
+                signatureCtx.stroke();
+            }
+
+            function endSignature(e) {
+                if (!drawingSignature) return;
+                e.preventDefault();
+                drawingSignature = false;
+            }
+
+            function renderConsentLanguage() {
+                const ar = consentLanguage.value === 'ar';
+                consentTerms.classList.toggle('rtlText', ar);
+                consentTitle.textContent = ar ? 'الشروط والأحكام' : 'Terms and Conditions';
+                signatureTitle.textContent = ar ? 'التوقيع' : 'Signature';
+                consentAcceptText.textContent = ar ? 'قرأت وأوافق على الشروط والأحكام.' : 'I have read and agree to the terms and conditions.';
+                consentGuestName.textContent = currentConsent && currentConsent.guestName ? (ar ? `الضيف: ${currentConsent.guestName}` : `Guest: ${currentConsent.guestName}`) : '';
+                consentTerms.textContent = currentConsent ? (ar ? (currentConsent.termsAr || currentConsent.termsEn || '') : (currentConsent.termsEn || currentConsent.termsAr || '')) : '';
+                clearSignatureBtn.textContent = ar ? 'مسح التوقيع' : 'Clear signature';
+                submitConsentBtn.textContent = ar ? 'إرسال الموافقة الموقعة' : 'Submit signed consent';
+            }
+
+            function showConsent(data) {
+                currentConsent = data;
+                currentEt = null;
+                currentSessionId = null;
+                consentLanguage.value = String(data.language || 'en').toLowerCase() === 'ar' ? 'ar' : 'en';
+                screensaver.style.display = 'none';
+                statusPanel.style.display = 'none';
+                sessionSec.style.display = 'none';
+                consentApproval.style.display = 'block';
+                doneRibbon.style.display = 'none';
+                consentAccepted.checked = false;
+                consentMessage.textContent = '';
+                clearSignature();
+                renderConsentLanguage();
+                setStatus();
+            }
+
+            async function getActiveConsent() {
+                const r = await fetch(`/api/consents/active?kid=${encodeURIComponent(kid)}`, { cache: 'no-store' });
+                if (r.status === 200) return r.json();
+                return null;
+            }
+
+            async function checkActiveConsent(force) {
+                if (consentPollInFlight) return false;
+                consentPollInFlight = true;
+                try {
+                    const c = await getActiveConsent();
+                    if (c && c.id) {
+                        if (force || !currentConsent || Number(currentConsent.id) !== Number(c.id)) showConsent(c);
+                        return true;
+                    }
+                    if (currentConsent) showReady();
+                    return false;
+                } catch (err) {
+                    console.warn('active-consent check failed', err);
+                    return false;
+                } finally {
+                    consentPollInFlight = false;
+                }
+            }
+
+            consentLanguage.addEventListener('change', renderConsentLanguage);
+            clearSignatureBtn.onclick = clearSignature;
+            signatureCanvas.addEventListener('pointerdown', startSignature);
+            signatureCanvas.addEventListener('pointermove', moveSignature);
+            signatureCanvas.addEventListener('pointerup', endSignature);
+            signatureCanvas.addEventListener('pointerleave', endSignature);
+            signatureCanvas.addEventListener('touchstart', startSignature, { passive: false });
+            signatureCanvas.addEventListener('touchmove', moveSignature, { passive: false });
+            signatureCanvas.addEventListener('touchend', endSignature, { passive: false });
+
+            submitConsentBtn.onclick = async () => {
+                if (!currentConsent) return;
+                const ar = consentLanguage.value === 'ar';
+                if (!consentAccepted.checked) { alert(ar ? 'يجب الموافقة على الشروط أولاً.' : 'Please accept the terms first.'); return; }
+                if (!hasSignature) { alert(ar ? 'يرجى التوقيع أولاً.' : 'Please sign first.'); return; }
+                submitConsentBtn.disabled = true;
+                consentMessage.textContent = ar ? 'جارٍ الحفظ...' : 'Saving...';
+                try {
+                    const res = await fetch(`/api/consents/${currentConsent.id}/sign`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ accepted: true, language: consentLanguage.value, signatureImage: signatureCanvas.toDataURL('image/jpeg', .9) })
+                    });
+                    if (res.ok) {
+                        consentMessage.textContent = ar ? 'تم الحفظ.' : 'Saved.';
+                        setTimeout(showReady, 1400);
+                    } else {
+                        const err = await res.json().catch(() => ({}));
+                        alert(err.error || `Error ${res.status}`);
+                    }
+                } finally {
+                    submitConsentBtn.disabled = false;
+                }
+            };
+
             // ===== data =====
             async function getActiveSession() {
                 const r = await fetch(`/api/sessions/active?kid=${encodeURIComponent(kid)}`, { cache: 'no-store' });
@@ -501,6 +767,7 @@
             }
 
             async function checkActiveSession(force) {
+                if (currentConsent) return false;
                 if (activePollInFlight) return false;
                 activePollInFlight = true;
                 try {
@@ -523,8 +790,8 @@
 
             function startActivePolling() {
                 if (activePollTimer) clearInterval(activePollTimer);
-                activePollTimer = setInterval(() => {
-                    checkActiveSession(false);
+                activePollTimer = setInterval(async () => {
+                    if (!await checkActiveConsent(false)) await checkActiveSession(false);
                 }, 1000);
             }
 
@@ -698,12 +965,17 @@
                     showCompletedThenReady();
                 });
 
-                hub.onreconnected(() => checkActiveSession(true));
-                hub.onclose(() => setTimeout(() => checkActiveSession(true), 500));
+                hub.on('consentChanged', p => {
+                    if (p && p.status === 'signed') showReady();
+                    else checkActiveConsent(true);
+                });
+
+                hub.onreconnected(async () => { if (!await checkActiveConsent(true)) await checkActiveSession(true); });
+                hub.onclose(() => setTimeout(async () => { if (!await checkActiveConsent(true)) await checkActiveSession(true); }, 500));
 
                 hub.start()
-                    .then(() => checkActiveSession(true))
-                    .catch(() => setTimeout(() => checkActiveSession(true), 500));
+                    .then(async () => { if (!await checkActiveConsent(true)) await checkActiveSession(true); })
+                    .catch(() => setTimeout(async () => { if (!await checkActiveConsent(true)) await checkActiveSession(true); }, 500));
             }
 
             // ===== boot =====
@@ -712,7 +984,7 @@
                 requestWakeLock();
                 await loadScreensaverConfig();
                 buildSlides(); // always show slider initially
-                if (!await checkActiveSession(true)) showReady();
+                if (!await checkActiveConsent(true) && !await checkActiveSession(true)) showReady();
                 startActivePolling();
             })();
 
