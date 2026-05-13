@@ -1,6 +1,7 @@
 using GuestGate.Api.Data;
 using GuestGate.Api.Hubs;
 using GuestGate.Api.Models;
+using GuestGate.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -43,6 +44,11 @@ builder.Host.UseSerilog((ctx, services, lg) =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHostedService<GuestGate.Api.Services.SessionExpiryWorker>();
+builder.Services.AddScoped<IConsentPdfWriter, ConsentPdfWriter>();
+if (builder.Configuration.GetValue<bool>("SqlDependency:Enabled"))
+{
+    builder.Services.AddHostedService<ConsentWatcher>();
+}
 
 var app = builder.Build();
 
@@ -83,6 +89,7 @@ app.UseSwaggerUI();
 app.UseCors();
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.MapGet("/consent", () => Results.Redirect("/consent.html"));
 
 app.MapGet("/diag/health", (IConfiguration cfg) => Results.Ok(new
 {
@@ -349,6 +356,76 @@ app.MapGet("/api/mobile/form-config", async (Guid et, AppDb db) =>
     return Results.Content($@"{{""templateId"":""{tplId}"",""template"":{t.DataJson},""prefill"":{prefill}}}", "application/json");
 });
 
+
+api.MapPost("/consents", async (ConsentCreateDto body, AppDb db, IHubContext<GuestHub> hub) =>
+{
+    if (body is null) return Results.BadRequest(new { error = "Invalid payload" });
+    var KID = GuestHub.NormalizeKid(body.kid);
+    if (string.IsNullOrWhiteSpace(KID)) return Results.BadRequest(new { error = "kid is required" });
+
+    var language = NormalizeConsentLanguage(body.language);
+    var now = DateTime.UtcNow;
+    var request = new ConsentRequest
+    {
+        Kid = KID,
+        GuestName = (body.guestName ?? string.Empty).Trim(),
+        Language = language,
+        TermsEn = string.IsNullOrWhiteSpace(body.termsEn) ? DefaultTermsEn : body.termsEn.Trim(),
+        TermsAr = string.IsNullOrWhiteSpace(body.termsAr) ? DefaultTermsAr : body.termsAr.Trim(),
+        Status = "waiting",
+        CreatedAt = now,
+        UpdatedAt = now
+    };
+
+    db.ConsentRequests.Add(request);
+    await db.SaveChangesAsync();
+    await NotifyConsentChangedAsync(hub, request.Kid, request.Id, "waiting");
+
+    return Results.Ok(ToConsentDto(request));
+});
+
+api.MapGet("/consents/active", async (string kid, AppDb db) =>
+{
+    var KID = GuestHub.NormalizeKid(kid);
+    if (string.IsNullOrWhiteSpace(KID)) return Results.BadRequest(new { error = "kid is required" });
+
+    var request = await db.ConsentRequests
+        .Where(x => x.Kid.ToUpper() == KID && (x.Status == "waiting" || x.Status == "assigned"))
+        .OrderBy(x => x.Id)
+        .FirstOrDefaultAsync();
+
+    if (request is null) return Results.NoContent();
+    if (request.Status == "waiting")
+    {
+        request.Status = "assigned";
+        request.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    return Results.Ok(ToConsentDto(request));
+});
+
+api.MapPost("/consents/{id:int}/sign", async (int id, ConsentSignDto body, AppDb db, IConsentPdfWriter pdfWriter, IHubContext<GuestHub> hub, CancellationToken ct) =>
+{
+    if (body is null) return Results.BadRequest(new { error = "Invalid payload" });
+    if (!body.accepted) return Results.BadRequest(new { error = "The terms must be accepted before signing." });
+    if (string.IsNullOrWhiteSpace(body.signatureImage)) return Results.BadRequest(new { error = "signatureImage is required" });
+
+    var request = await db.ConsentRequests.FirstOrDefaultAsync(x => x.Id == id, ct);
+    if (request is null) return Results.NotFound(new { error = "Consent request not found" });
+    if (request.Status == "signed") return Results.Conflict(new { error = "Consent request is already signed", pdfPath = request.PdfPath });
+
+    request.Accepted = true;
+    request.SignatureImageDataUrl = body.signatureImage;
+    request.SignedAt = DateTime.UtcNow;
+    request.Status = "signed";
+    request.PdfPath = await pdfWriter.WriteAsync(request, ct);
+    await db.SaveChangesAsync(ct);
+
+    await NotifyConsentChangedAsync(hub, request.Kid, request.Id, "signed");
+    return Results.Ok(new { ok = true, id = request.Id, pdfPath = request.PdfPath });
+});
+
 app.MapGet("/tablet/{kid}/form-config", async (string kid, AppDb db) =>
 {
     var KID = GuestHub.NormalizeKid(kid);
@@ -478,6 +555,43 @@ api.MapPost("/mobile/save", async (MobileSaveDto body, AppDb db, IHubContext<Gue
 .Produces(StatusCodes.Status200OK).Produces(StatusCodes.Status404NotFound).Produces(StatusCodes.Status409Conflict).Produces(StatusCodes.Status410Gone);
 app.Run();
 
+
+
+static string NormalizeConsentLanguage(string? language)
+{
+    return string.Equals((language ?? string.Empty).Trim(), "ar", StringComparison.OrdinalIgnoreCase) ? "ar" : "en";
+}
+
+static object ToConsentDto(ConsentRequest request)
+{
+    return new
+    {
+        id = request.Id,
+        kid = GuestHub.NormalizeKid(request.Kid),
+        guestName = request.GuestName,
+        language = NormalizeConsentLanguage(request.Language),
+        termsEn = request.TermsEn,
+        termsAr = request.TermsAr,
+        status = request.Status,
+        accepted = request.Accepted,
+        signedAt = request.SignedAt,
+        pdfPath = request.PdfPath
+    };
+}
+
+static Task NotifyConsentChangedAsync(IHubContext<GuestHub> hub, string kid, int consentId, string status)
+{
+    var normalizedKid = GuestHub.NormalizeKid(kid);
+    return hub.Clients.Group(GuestHub.KioskGroup(normalizedKid)).SendAsync("consentChanged", new
+    {
+        kid = normalizedKid,
+        consentId,
+        status
+    });
+}
+
+const string DefaultTermsEn = "I confirm that I have read, understood, and agree to the hotel terms and conditions.";
+const string DefaultTermsAr = "أؤكد أنني قرأت وفهمت وأوافق على شروط وأحكام الفندق.";
 
 static string BuildScanUrl(string mobileBaseUrl, Guid editToken, string kid)
 {

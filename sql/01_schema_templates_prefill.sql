@@ -67,3 +67,30 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_KioskSessions_ActiveKid'
 GO
 
 PRINT '✅ Database ready (no triggers; EF handles timestamps).';
+
+-- Consent requests for kiosk approval/signature flow
+IF OBJECT_ID('dbo.ConsentRequests','U') IS NULL
+BEGIN
+  CREATE TABLE dbo.ConsentRequests(
+    Id                    INT IDENTITY(1,1) PRIMARY KEY,
+    Kid                   NVARCHAR(50)      NOT NULL,
+    GuestName             NVARCHAR(200)     NOT NULL CONSTRAINT DF_CR_GuestName DEFAULT N'',
+    Language              NVARCHAR(5)       NOT NULL CONSTRAINT DF_CR_Language DEFAULT N'en',
+    TermsEn               NVARCHAR(MAX)     NOT NULL,
+    TermsAr               NVARCHAR(MAX)     NOT NULL,
+    Status                NVARCHAR(20)      NOT NULL CONSTRAINT DF_CR_Status DEFAULT N'waiting',
+    Accepted              BIT               NOT NULL CONSTRAINT DF_CR_Accepted DEFAULT 0,
+    SignatureImageDataUrl NVARCHAR(MAX)     NULL,
+    PdfPath               NVARCHAR(500)     NULL,
+    SignedAt              DATETIME2(7)      NULL,
+    CreatedAt             DATETIME2(7)      NOT NULL CONSTRAINT DF_CR_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt             DATETIME2(7)      NOT NULL CONSTRAINT DF_CR_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT CK_CR_Status CHECK (Status IN (N'waiting', N'assigned', N'signed', N'cancelled')),
+    CONSTRAINT CK_CR_Language CHECK (Language IN (N'en', N'ar'))
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_ConsentRequests_Kid_Status' AND object_id=OBJECT_ID('dbo.ConsentRequests'))
+  CREATE INDEX IX_ConsentRequests_Kid_Status ON dbo.ConsentRequests(Kid, Status, Id);
+GO
