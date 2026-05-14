@@ -874,12 +874,6 @@
                     || ['mobile', 'phone', 'tel', 'جوال', 'موبايل', 'هاتف', 'تليفون', 'تلفون'].some(k => text.includes(k));
             }
 
-            function isGuestVisible(field) {
-                const g = field && field.guest;
-                if (!g) return true;
-                return !(g.hide === true || g.visible === false || String(g.visible).toLowerCase() === 'false');
-            }
-
             async function renderInlineForm() {
                 inlineForm.innerHTML = '';
                 let r = await fetch(`/tablet/${encodeURIComponent(kid)}/form-config`, { cache: 'no-store' });
@@ -893,7 +887,6 @@
                 const template = cfg.template || {};
                 const prefill = cfg.prefill || {};
                 const fields = (template.fields || [])
-                    .filter(isGuestVisible)
                     .filter(f => !f.scope || f.scope === 'StartForm')
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 

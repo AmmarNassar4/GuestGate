@@ -116,12 +116,7 @@
   function fieldLabel(field){ return field.label || fieldKey(field); }
   function isRequired(field){ return !!(field.guest && field.guest.required); }
   function isEditable(field){ return !(field.guest && field.guest.editable === false); }
-  function isGuestVisible(field){
-    const g = field && field.guest;
-    if(!g) return true;
-    return !(g.hide === true || g.visible === false || String(g.visible).toLowerCase() === 'false');
-  }
-  function isHidden(field){ return !isGuestVisible(field); }
+  function isHidden(field){ return !!(field.guest && field.guest.hide === true); }
   function isPhoneField(field){
     if(window.GuestGatePhone) return window.GuestGatePhone.isPhoneField(field);
     const text = [fieldKey(field), fieldLabel(field), field.dataType || ''].join(' ').toLowerCase();
