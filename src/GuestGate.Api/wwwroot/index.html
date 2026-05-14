@@ -676,7 +676,15 @@
                 consentTitle.textContent = ar ? 'الشروط والأحكام' : 'Terms and Conditions';
                 signatureTitle.textContent = ar ? 'التوقيع' : 'Signature';
                 consentAcceptText.textContent = ar ? 'قرأت وأوافق على الشروط والأحكام.' : 'I have read and agree to the terms and conditions.';
-                consentGuestName.textContent = currentConsent && currentConsent.guestName ? (ar ? `الضيف: ${currentConsent.guestName}` : `Guest: ${currentConsent.guestName}`) : '';
+                if (currentConsent) {
+                    const guestName = currentConsent.guestName || '';
+                    const identityNumber = currentConsent.identityNumber || '';
+                    consentGuestName.textContent = ar
+                        ? `الضيف: ${guestName}${identityNumber ? ' - الهوية: ' + identityNumber : ''}`
+                        : `Guest: ${guestName}${identityNumber ? ' - ID: ' + identityNumber : ''}`;
+                } else {
+                    consentGuestName.textContent = '';
+                }
                 consentTerms.textContent = currentConsent ? (ar ? (currentConsent.termsAr || currentConsent.termsEn || '') : (currentConsent.termsEn || currentConsent.termsAr || '')) : '';
                 clearSignatureBtn.textContent = ar ? 'مسح التوقيع' : 'Clear signature';
                 submitConsentBtn.textContent = ar ? 'إرسال الموافقة الموقعة' : 'Submit signed consent';
@@ -734,18 +742,73 @@
             signatureCanvas.addEventListener('touchmove', moveSignature, { passive: false });
             signatureCanvas.addEventListener('touchend', endSignature, { passive: false });
 
+
+            function buildTightSignatureJpeg() {
+                const src = signatureCanvas;
+                const ctx = signatureCtx;
+                const w = src.width;
+                const h = src.height;
+                const data = ctx.getImageData(0, 0, w, h).data;
+
+                let minX = w, minY = h, maxX = -1, maxY = -1;
+
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        const i = (y * w + x) * 4;
+                        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+                        const isInk = a > 0 && (r < 245 || g < 245 || b < 245);
+                        if (isInk) {
+                            minX = Math.min(minX, x);
+                            minY = Math.min(minY, y);
+                            maxX = Math.max(maxX, x);
+                            maxY = Math.max(maxY, y);
+                        }
+                    }
+                }
+
+                if (maxX < minX || maxY < minY) return null;
+
+                const pad = 35;
+                minX = Math.max(0, minX - pad);
+                minY = Math.max(0, minY - pad);
+                maxX = Math.min(w - 1, maxX + pad);
+                maxY = Math.min(h - 1, maxY + pad);
+
+                const cropW = maxX - minX + 1;
+                const cropH = maxY - minY + 1;
+                const out = document.createElement('canvas');
+                out.width = 900;
+                out.height = 270;
+
+                const octx = out.getContext('2d');
+                octx.fillStyle = '#fff';
+                octx.fillRect(0, 0, out.width, out.height);
+
+                const margin = 18;
+                const scale = Math.min((out.width - margin * 2) / cropW, (out.height - margin * 2) / cropH);
+                const drawW = cropW * scale;
+                const drawH = cropH * scale;
+                const drawX = (out.width - drawW) / 2;
+                const drawY = (out.height - drawH) / 2;
+
+                octx.drawImage(src, minX, minY, cropW, cropH, drawX, drawY, drawW, drawH);
+                return out.toDataURL('image/jpeg', 0.92);
+            }
+
             submitConsentBtn.onclick = async () => {
                 if (!currentConsent) return;
                 const ar = consentLanguage.value === 'ar';
                 if (!consentAccepted.checked) { alert(ar ? 'يجب الموافقة على الشروط أولاً.' : 'Please accept the terms first.'); return; }
                 if (!hasSignature) { alert(ar ? 'يرجى التوقيع أولاً.' : 'Please sign first.'); return; }
+                const signatureImage = buildTightSignatureJpeg();
+                if (!signatureImage) { alert(ar ? 'يرجى التوقيع أولاً.' : 'Please sign first.'); return; }
                 submitConsentBtn.disabled = true;
                 consentMessage.textContent = ar ? 'جارٍ الحفظ...' : 'Saving...';
                 try {
                     const res = await fetch(`/api/consents/${currentConsent.id}/sign`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ accepted: true, language: consentLanguage.value, signatureImage: signatureCanvas.toDataURL('image/jpeg', .9) })
+                        body: JSON.stringify({ accepted: true, language: consentLanguage.value, signatureImage })
                     });
                     if (res.ok) {
                         consentMessage.textContent = ar ? 'تم الحفظ.' : 'Saved.';

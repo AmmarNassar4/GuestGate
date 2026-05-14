@@ -358,11 +358,20 @@ app.MapGet("/api/mobile/form-config", async (Guid et, AppDb db) =>
 });
 
 
-api.MapPost("/consents", async (ConsentCreateDto body, AppDb db, IHubContext<GuestHub> hub) =>
+api.MapPost("/consents", async (
+    ConsentCreateDto body,
+    AppDb db,
+    IWebHostEnvironment env,
+    IHubContext<GuestHub> hub,
+    CancellationToken ct) =>
 {
     if (body is null) return Results.BadRequest(new { error = "Invalid payload" });
+
     var KID = GuestHub.NormalizeKid(body.kid);
     if (string.IsNullOrWhiteSpace(KID)) return Results.BadRequest(new { error = "kid is required" });
+
+    var checkInTime = (body.checkInTime ?? string.Empty).Trim();
+    if (string.IsNullOrWhiteSpace(checkInTime)) return Results.BadRequest(new { error = "checkInTime is required" });
 
     var language = NormalizeConsentLanguage(body.language);
     var now = DateTime.UtcNow;
@@ -370,19 +379,49 @@ api.MapPost("/consents", async (ConsentCreateDto body, AppDb db, IHubContext<Gue
     {
         Kid = KID,
         GuestName = (body.guestName ?? string.Empty).Trim(),
+        IdentityNumber = (body.identityNumber ?? string.Empty).Trim(),
+        CheckInTime = checkInTime,
         Language = language,
-        TermsEn = string.IsNullOrWhiteSpace(body.termsEn) ? ConsentDefaults.TermsEn : body.termsEn.Trim(),
-        TermsAr = string.IsNullOrWhiteSpace(body.termsAr) ? ConsentDefaults.TermsAr : body.termsAr.Trim(),
+        TermsEn = await LoadConsentTermsAsync(env, "en", checkInTime, ct),
+        TermsAr = await LoadConsentTermsAsync(env, "ar", checkInTime, ct),
         Status = "waiting",
         CreatedAt = now,
         UpdatedAt = now
     };
 
     db.ConsentRequests.Add(request);
-    await db.SaveChangesAsync();
+    await db.SaveChangesAsync(ct);
     await NotifyConsentChangedAsync(hub, request.Kid, request.Id, "waiting");
 
     return Results.Ok(ToConsentDto(request));
+});
+
+api.MapGet("/consents/{id:int}", async Task<IResult> (int id, AppDb db) =>
+{
+    var request = await db.ConsentRequests.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
+    if (request is null) return Results.NotFound(new { error = "Consent request not found" });
+    return Results.Ok(ToConsentDto(request));
+});
+
+api.MapGet("/consents/{id:int}/signature", async Task<IResult> (int id, AppDb db) =>
+{
+    var request = await db.ConsentRequests.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
+    if (request is null) return Results.NotFound(new { error = "Consent request not found" });
+
+    if (!string.Equals(request.Status, "signed", StringComparison.OrdinalIgnoreCase) ||
+        string.IsNullOrWhiteSpace(request.SignatureImageDataUrl))
+    {
+        return Results.NotFound(new { error = "Signature is not available yet" });
+    }
+
+    return Results.Ok(new
+    {
+        id = request.Id,
+        status = request.Status,
+        pdfPath = request.PdfPath,
+        signatureImage = request.SignatureImageDataUrl,
+        signedAt = request.SignedAt
+    });
 });
 
 api.MapGet("/consents/active", async (string kid, AppDb db) =>
@@ -424,7 +463,7 @@ api.MapPost("/consents/{id:int}/sign", async (int id, ConsentSignDto body, AppDb
     request.PdfPath = await pdfWriter.WriteAsync(request, ct);
     await db.SaveChangesAsync(ct);
 
-    await NotifyConsentChangedAsync(hub, request.Kid, request.Id, "signed");
+    await NotifyConsentChangedAsync(hub, request.Kid, request.Id, "signed", request.PdfPath);
     return Results.Ok(new { ok = true, id = request.Id, pdfPath = request.PdfPath });
 });
 
@@ -571,6 +610,8 @@ BEGIN
         [Id] int IDENTITY(1,1) NOT NULL CONSTRAINT [PK_ConsentRequests] PRIMARY KEY,
         [Kid] nvarchar(50) NOT NULL,
         [GuestName] nvarchar(200) NOT NULL CONSTRAINT [DF_ConsentRequests_GuestName] DEFAULT N'',
+        [IdentityNumber] nvarchar(80) NOT NULL CONSTRAINT [DF_ConsentRequests_IdentityNumber] DEFAULT N'',
+        [CheckInTime] nvarchar(50) NOT NULL CONSTRAINT [DF_ConsentRequests_CheckInTime] DEFAULT N'',
         [Language] nvarchar(5) NOT NULL CONSTRAINT [DF_ConsentRequests_Language] DEFAULT N'en',
         [TermsEn] nvarchar(max) NOT NULL CONSTRAINT [DF_ConsentRequests_TermsEn] DEFAULT N'',
         [TermsAr] nvarchar(max) NOT NULL CONSTRAINT [DF_ConsentRequests_TermsAr] DEFAULT N'',
@@ -586,7 +627,49 @@ BEGIN
     CREATE INDEX [IX_ConsentRequests_Kid_Status] ON [dbo].[ConsentRequests] ([Kid], [Status]);
 END
 ");
+
+
+    if (db.Database.IsSqlServer())
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+IF COL_LENGTH(N'dbo.ConsentRequests', N'IdentityNumber') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[ConsentRequests]
+    ADD [IdentityNumber] nvarchar(80) NOT NULL CONSTRAINT [DF_ConsentRequests_IdentityNumber] DEFAULT N'';
+END
+
+IF COL_LENGTH(N'dbo.ConsentRequests', N'CheckInTime') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[ConsentRequests]
+    ADD [CheckInTime] nvarchar(50) NOT NULL CONSTRAINT [DF_ConsentRequests_CheckInTime] DEFAULT N'';
+END
+");
     }
+    }
+}
+
+static async Task<string> LoadConsentTermsAsync(IWebHostEnvironment env, string language, string checkInTime, CancellationToken ct)
+{
+    var fileName = NormalizeConsentLanguage(language) == "ar" ? "ar.txt" : "en.txt";
+    var candidates = new[]
+    {
+        Path.Combine(env.ContentRootPath ?? AppContext.BaseDirectory, "terms", fileName),
+        Path.Combine(AppContext.BaseDirectory, "terms", fileName),
+        Path.Combine(env.WebRootPath ?? Path.Combine(AppContext.BaseDirectory, "wwwroot"), "terms", fileName)
+    };
+
+    foreach (var path in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+    {
+        if (!File.Exists(path)) continue;
+        var template = await File.ReadAllTextAsync(path, Encoding.UTF8, ct);
+        return template.Replace("<time>", checkInTime, StringComparison.OrdinalIgnoreCase);
+    }
+
+    var fallback = NormalizeConsentLanguage(language) == "ar"
+        ? ConsentDefaults.TermsAr
+        : ConsentDefaults.TermsEn;
+
+    return fallback.Replace("<time>", checkInTime, StringComparison.OrdinalIgnoreCase);
 }
 
 static string NormalizeConsentLanguage(string? language)
@@ -601,6 +684,8 @@ static object ToConsentDto(ConsentRequest request)
         id = request.Id,
         kid = GuestHub.NormalizeKid(request.Kid),
         guestName = request.GuestName,
+        identityNumber = request.IdentityNumber,
+        checkInTime = request.CheckInTime,
         language = NormalizeConsentLanguage(request.Language),
         termsEn = request.TermsEn,
         termsAr = request.TermsAr,
@@ -611,14 +696,15 @@ static object ToConsentDto(ConsentRequest request)
     };
 }
 
-static Task NotifyConsentChangedAsync(IHubContext<GuestHub> hub, string kid, int consentId, string status)
+static Task NotifyConsentChangedAsync(IHubContext<GuestHub> hub, string kid, int consentId, string status, string? pdfPath = null)
 {
     var normalizedKid = GuestHub.NormalizeKid(kid);
     return hub.Clients.Group(GuestHub.KioskGroup(normalizedKid)).SendAsync("consentChanged", new
     {
         kid = normalizedKid,
         consentId,
-        status
+        status,
+        pdfPath
     });
 }
 

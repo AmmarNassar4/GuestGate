@@ -75,6 +75,8 @@ BEGIN
     Id                    INT IDENTITY(1,1) PRIMARY KEY,
     Kid                   NVARCHAR(50)      NOT NULL,
     GuestName             NVARCHAR(200)     NOT NULL CONSTRAINT DF_CR_GuestName DEFAULT N'',
+    IdentityNumber        NVARCHAR(80)      NOT NULL CONSTRAINT DF_CR_IdentityNumber DEFAULT N'',
+    CheckInTime           NVARCHAR(50)      NOT NULL CONSTRAINT DF_CR_CheckInTime DEFAULT N'',
     Language              NVARCHAR(5)       NOT NULL CONSTRAINT DF_CR_Language DEFAULT N'en',
     TermsEn               NVARCHAR(MAX)     NOT NULL,
     TermsAr               NVARCHAR(MAX)     NOT NULL,

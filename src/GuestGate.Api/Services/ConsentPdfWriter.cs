@@ -54,7 +54,8 @@ namespace GuestGate.Api.Services
             lines.AddRange(WrapForPdf(terms, 92));
 
             var signatureBytes = TryReadDataUrlImage(request.SignatureImageDataUrl);
-            var hasSignature = signatureBytes.Length > 0;
+            var signatureSize = TryGetJpegSize(signatureBytes);
+            var hasSignature = signatureBytes.Length > 0 && signatureSize is not null;
 
             var content = new StringBuilder();
             content.AppendLine("BT");
@@ -67,11 +68,18 @@ namespace GuestGate.Api.Services
                 first = false;
             }
             content.AppendLine("ET");
-            content.AppendLine("0 0 0 RG 50 168 250 70 re S");
+            const double sigBoxX = 50;
+            const double sigBoxY = 168;
+            const double sigBoxW = 250;
+            const double sigBoxH = 70;
+            const double sigPad = 5;
+
+            content.AppendLine(FormattableString.Invariant($"0 0 0 RG {sigBoxX} {sigBoxY} {sigBoxW} {sigBoxH} re S"));
             content.AppendLine($"BT /F1 12 Tf 50 150 Td <{ToPdfUnicodeHex("Guest signature:")}> Tj ET");
-            if (hasSignature)
+            if (hasSignature && signatureSize is { } sigSize)
             {
-                content.AppendLine("q 240 0 0 68 55 172 cm /Sig Do Q");
+                var fitted = FitInside(sigSize.Width, sigSize.Height, sigBoxX + sigPad, sigBoxY + sigPad, sigBoxW - sigPad * 2, sigBoxH - sigPad * 2);
+                content.AppendLine(FormattableString.Invariant($"q {fitted.W:0.###} 0 0 {fitted.H:0.###} {fitted.X:0.###} {fitted.Y:0.###} cm /Sig Do Q"));
             }
 
             var objects = new List<byte[]>();
@@ -87,12 +95,63 @@ namespace GuestGate.Api.Services
             var contentBytes = Encoding.UTF8.GetBytes(content.ToString());
             objects.Add(StreamObject(contentBytes, ""));
 
-            if (hasSignature)
+            if (hasSignature && signatureSize is { } size)
             {
-                objects.Add(StreamObject(signatureBytes, " /Type /XObject /Subtype /Image /Width 600 /Height 180 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode"));
+                objects.Add(StreamObject(signatureBytes, $" /Type /XObject /Subtype /Image /Width {size.Width} /Height {size.Height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode"));
             }
 
             return ComposePdf(objects);
+        }
+
+
+        private static (double X, double Y, double W, double H) FitInside(int imageWidth, int imageHeight, double boxX, double boxY, double boxW, double boxH)
+        {
+            var scale = Math.Min(boxW / imageWidth, boxH / imageHeight);
+            var w = imageWidth * scale;
+            var h = imageHeight * scale;
+            return (boxX + (boxW - w) / 2, boxY + (boxH - h) / 2, w, h);
+        }
+
+        private static (int Width, int Height)? TryGetJpegSize(byte[] bytes)
+        {
+            if (bytes.Length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8) return null;
+
+            var i = 2;
+            while (i + 9 < bytes.Length)
+            {
+                if (bytes[i] != 0xFF)
+                {
+                    i++;
+                    continue;
+                }
+
+                while (i < bytes.Length && bytes[i] == 0xFF) i++;
+                if (i >= bytes.Length) return null;
+
+                var marker = bytes[i++];
+                if (marker == 0xD9 || marker == 0xDA) return null;
+                if (i + 1 >= bytes.Length) return null;
+
+                var length = (bytes[i] << 8) + bytes[i + 1];
+                if (length < 2 || i + length > bytes.Length) return null;
+
+                var isSof =
+                    (marker >= 0xC0 && marker <= 0xC3) ||
+                    (marker >= 0xC5 && marker <= 0xC7) ||
+                    (marker >= 0xC9 && marker <= 0xCB) ||
+                    (marker >= 0xCD && marker <= 0xCF);
+
+                if (isSof)
+                {
+                    var height = (bytes[i + 3] << 8) + bytes[i + 4];
+                    var width = (bytes[i + 5] << 8) + bytes[i + 6];
+                    return (width, height);
+                }
+
+                i += length;
+            }
+
+            return null;
         }
 
         private static IEnumerable<string> WrapForPdf(string? value, int max)

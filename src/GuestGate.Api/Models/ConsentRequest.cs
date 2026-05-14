@@ -7,6 +7,8 @@ namespace GuestGate.Api.Models
         public int Id { get; set; }
         public string Kid { get; set; } = default!;
         public string GuestName { get; set; } = string.Empty;
+        public string IdentityNumber { get; set; } = string.Empty;
+        public string CheckInTime { get; set; } = string.Empty;
         public string Language { get; set; } = "en";
         public string TermsEn { get; set; } = string.Empty;
         public string TermsAr { get; set; } = string.Empty;

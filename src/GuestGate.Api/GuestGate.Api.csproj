@@ -22,4 +22,10 @@
     <Folder Include="wwwroot\slides\" />
     <Folder Include="wwwroot\img\hotel\" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="terms\*.txt"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
