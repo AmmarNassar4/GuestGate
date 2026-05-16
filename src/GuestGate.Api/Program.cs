@@ -445,6 +445,9 @@ api.MapGet("/consents/active", async (string kid, AppDb db) =>
     return Results.Ok(ToConsentDto(request));
 });
 
+api.MapDelete("/consents/active", CancelActiveConsentsForKidAsync);
+app.MapPost("/api/consents/cancel", CancelActiveConsentsForKidAsync);
+
 api.MapPost("/consents/{id:int}/sign", async (int id, ConsentSignDto body, AppDb db, IConsentPdfWriter pdfWriter, IHubContext<GuestHub> hub, CancellationToken ct) =>
 {
     if (body is null) return Results.BadRequest(new { error = "Invalid payload" });
@@ -870,6 +873,37 @@ static Task NotifyConsentChangedAsync(IHubContext<GuestHub> hub, string kid, int
         status,
         pdfPath
     });
+}
+
+static async Task<IResult> CancelActiveConsentsForKidAsync(string kid, AppDb db, IHubContext<GuestHub> hub)
+{
+    var KID = GuestHub.NormalizeKid(kid);
+    if (string.IsNullOrWhiteSpace(KID))
+        return Results.BadRequest(new { error = "kid is required" });
+
+    var requests = await db.ConsentRequests
+        .Where(x => x.Kid.ToUpper() == KID && (x.Status == "waiting" || x.Status == "assigned"))
+        .OrderBy(x => x.Id)
+        .ToListAsync();
+
+    if (requests.Count == 0)
+        return Results.NoContent();
+
+    var now = DateTime.UtcNow;
+    foreach (var request in requests)
+    {
+        request.Status = "cancelled";
+        request.UpdatedAt = now;
+    }
+
+    await db.SaveChangesAsync();
+
+    foreach (var request in requests)
+    {
+        await NotifyConsentChangedAsync(hub, request.Kid, request.Id, "cancelled");
+    }
+
+    return Results.Ok(new { ok = true, cancelledCount = requests.Count });
 }
 
 
