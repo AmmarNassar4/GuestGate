@@ -880,6 +880,30 @@
                 return !(g.hide === true || g.visible === false || String(g.visible).toLowerCase() === 'false');
             }
 
+            var LanguageOptions = [
+                { value: 'en', text: 'English' },
+                { value: 'ar', text: 'العربية' },
+                { value: 'fr', text: 'Français' },
+                { value: 'es', text: 'Español' },
+                { value: 'de', text: 'Deutsch' },
+                { value: 'zh', text: '中文' },
+                { value: 'ja', text: '日本語' },
+                { value: 'ru', text: 'Русский' },
+                { value: 'pt', text: 'Português' },
+                { value: 'it', text: 'Italiano' },
+                { value: 'ko', text: '한국어' },
+                { value: 'hi', text: 'हिन्दी' },
+                { value: 'tr', text: 'Türkçe' },
+                { value: 'fa', text: 'فارسی' },
+                { value: 'nl', text: 'Nederlands' }
+            ];
+
+            function isLanguageField(field) {
+                const k = String((field && (field.key || field.name || field.label || '')) || '').toLowerCase();
+                const dt = String((field && field.dataType) || '').toLowerCase();
+                return ['language', 'lang', 'اللغة'].some(s => k.includes(s)) || ['language', 'lang', 'languagecode'].includes(dt);
+            }
+
             async function renderInlineForm() {
                 inlineForm.innerHTML = '';
                 let r = await fetch(`/tablet/${encodeURIComponent(kid)}/form-config`, { cache: 'no-store' });
@@ -947,6 +971,23 @@
                             className: '',
                             placeholder: f.placeholder || 'Mobile number'
                         });
+                    } else if (isLanguageField(f)) {
+                        input = document.createElement('select');
+                        input.name = key;
+                        input.dataset.field = key;
+                        var emptyOpt = document.createElement('option');
+                        emptyOpt.value = '';
+                        emptyOpt.textContent = 'Select…';
+                        input.appendChild(emptyOpt);
+                        for (var _i = 0; _i < LanguageOptions.length; _i++) {
+                            var _o = document.createElement('option');
+                            _o.value = LanguageOptions[_i].value;
+                            _o.textContent = LanguageOptions[_i].text;
+                            input.appendChild(_o);
+                        }
+                        if (!editable) { input.disabled = true; input.classList.add('readonly'); }
+                        if (required) input.required = true;
+                        if (v !== undefined && v !== null) input.value = String(v);
                     } else {
                         input = buildInput(f);
                         input.name = key;

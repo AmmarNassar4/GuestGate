@@ -10,7 +10,8 @@ namespace GuestGate.Api.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IHubContext<GuestHub> _hub;
         private readonly ILogger<ConsentWatcher> _logger;
-        private DateTime _lastSeenUtc = DateTime.UtcNow;
+        private DateTime _lastSeenUtc = DateTime.MinValue;
+        private bool _firstPoll = true;
 
         public ConsentWatcher(IServiceScopeFactory scopeFactory, IHubContext<GuestHub> hub, ILogger<ConsentWatcher> logger)
         {
@@ -33,16 +34,24 @@ namespace GuestGate.Api.Services
                         .Select(x => new { x.Id, x.Kid, x.Status, x.UpdatedAt })
                         .ToListAsync(stoppingToken);
 
+                    if (_firstPoll && changed.Count == 0)
+                    {
+                        // No consents yet — set watermark to current time so startup doesn't re-broadcast older rows forever.
+                        _lastSeenUtc = DateTime.UtcNow;
+                    }
+
                     foreach (var item in changed)
                     {
                         await _hub.Clients.Group(GuestHub.KioskGroup(item.Kid)).SendAsync("consentChanged", new
                         {
                             kid = GuestHub.NormalizeKid(item.Kid),
                             consentId = item.Id,
-                            status = item.Status
+                            status = item.Status.ToString()
                         }, stoppingToken);
                         if (item.UpdatedAt > _lastSeenUtc) _lastSeenUtc = item.UpdatedAt;
                     }
+
+                    _firstPoll = false;
                 }
                 catch (Exception ex)
                 {

@@ -122,6 +122,8 @@
     return !(g.hide === true || g.visible === false || String(g.visible).toLowerCase() === 'false');
   }
   function isHidden(field){ return !isGuestVisible(field); }
+  var LanguageOptions=[{value:'en',text:'English'},{value:'ar',text:'العربية'},{value:'fr',text:'Français'},{value:'es',text:'Español'},{value:'de',text:'Deutsch'},{value:'zh',text:'中文'},{value:'ja',text:'日本語'},{value:'ru',text:'Русский'},{value:'pt',text:'Português'},{value:'it',text:'Italiano'},{value:'ko',text:'한국어'},{value:'hi',text:'हिन्दी'},{value:'tr',text:'Türkçe'},{value:'fa',text:'فارسی'},{value:'nl',text:'Nederlands'}];
+  function isLanguageField(field){const k=String((field&&(field.key||field.name||field.label||''))||'').toLowerCase();const dt=String((field&&field.dataType)||'').toLowerCase();return['language','lang','اللغة'].some(s=>k.includes(s))||['language','lang','languagecode'].includes(dt);}
   function isPhoneField(field){
     if(window.GuestGatePhone) return window.GuestGatePhone.isPhoneField(field);
     const text = [fieldKey(field), fieldLabel(field), field.dataType || ''].join(' ').toLowerCase();
@@ -223,34 +225,48 @@
       label.textContent = fieldLabel(field) + (isRequired(field) ? ' *' : '');
       col.appendChild(label);
 
-      if(isPhoneField(field)){
-        const phoneInput = window.GuestGatePhone
-          ? window.GuestGatePhone.createInput(field, value, {
-              key,
-              required: isRequired(field),
-              readOnly: !isEditable(field),
-              className: 'form-control form-control-lg',
-              placeholder: field.placeholder || 'Mobile number'
-            })
-          : buildStandardInput({ ...field, dataType: 'tel' });
-        phoneInput.name = key;
-        phoneInput.dataset.field = key;
-        if(isRequired(field)) phoneInput.required = true;
-        setInputReadonly(phoneInput, isEditable(field));
-        col.appendChild(phoneInput);
-        const hint = document.createElement('div');
-        hint.className = 'form-text mobile-hint';
-        hint.textContent = 'Select the country and enter the number; it will be saved in international format like +9665xxxxxxx.';
-        col.appendChild(hint);
-      } else {
-        const input = buildStandardInput(field);
-        input.name = key;
-        input.dataset.field = key;
-        if(isRequired(field)) input.required = true;
-        setInputReadonly(input, isEditable(field));
-        if(value !== undefined && value !== null) input.value = value;
-        col.appendChild(input);
-      }
+        if(isLanguageField(field)){
+          var langSelect = document.createElement('select');
+          langSelect.className = 'form-select form-select-lg';
+          var _empty = document.createElement('option');
+          _empty.value = '';
+          _empty.textContent = 'Select…';
+          langSelect.appendChild(_empty);
+          for(var i=0;i<LanguageOptions.length;i++){var _o=document.createElement('option');_o.value=LanguageOptions[i].value;_o.textContent=LanguageOptions[i].text;langSelect.appendChild(_o);}
+          langSelect.name = key;
+          langSelect.dataset.field = key;
+          if(isRequired(field)) langSelect.required = true;
+          setInputReadonly(langSelect, isEditable(field));
+          if(value !== undefined && value !== null) langSelect.value = String(value);
+          col.appendChild(langSelect);
+        } else if(isPhoneField(field)){
+          const phoneInput = window.GuestGatePhone
+            ? window.GuestGatePhone.createInput(field, value, {
+                key,
+                required: isRequired(field),
+                readOnly: !isEditable(field),
+                className: 'form-control form-control-lg',
+                placeholder: field.placeholder || 'Mobile number'
+              })
+            : buildStandardInput({ ...field, dataType: 'tel' });
+          phoneInput.name = key;
+          phoneInput.dataset.field = key;
+          if(isRequired(field)) phoneInput.required = true;
+          setInputReadonly(phoneInput, isEditable(field));
+          col.appendChild(phoneInput);
+          const hint = document.createElement('div');
+          hint.className = 'form-text mobile-hint';
+          hint.textContent = 'Select the country and enter the number; it will be saved in international format like +9665xxxxxxx.';
+          col.appendChild(hint);
+        } else {
+          const input = buildStandardInput(field);
+          input.name = key;
+          input.dataset.field = key;
+          if(isRequired(field)) input.required = true;
+          setInputReadonly(input, isEditable(field));
+          if(value !== undefined && value !== null) input.value = value;
+          col.appendChild(input);
+        }
 
       fieldsHost.appendChild(col);
     }

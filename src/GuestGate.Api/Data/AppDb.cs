@@ -16,13 +16,14 @@ namespace GuestGate.Api.Data
             b.Entity<Template>().HasKey(t => t.Id);
             b.Entity<KioskSession>().HasIndex(x => x.EditToken).IsUnique();
             b.Entity<KioskSession>().HasIndex(x => new { x.Kid, x.Status });
+            b.Entity<KioskSession>().HasIndex(x => new { x.Status, x.ExpiresAt });
             b.Entity<ConsentRequest>().HasIndex(x => new { x.Kid, x.Status });
             b.Entity<ConsentRequest>().Property(x => x.GuestName).HasMaxLength(200);
             b.Entity<ConsentRequest>().Property(x => x.IdentityNumber).HasMaxLength(80);
             b.Entity<ConsentRequest>().Property(x => x.CheckInTime).HasMaxLength(50);
             b.Entity<ConsentRequest>().Property(x => x.Kid).HasMaxLength(50);
             b.Entity<ConsentRequest>().Property(x => x.Language).HasMaxLength(5);
-            b.Entity<ConsentRequest>().Property(x => x.Status).HasMaxLength(20);
+            b.Entity<ConsentRequest>().Property(x => x.Status).HasConversion<byte>();
         }
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

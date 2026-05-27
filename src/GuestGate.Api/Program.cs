@@ -256,8 +256,7 @@ api.MapPost("/sessions/start", async (
     {
         active.Status = SessionStatus.Expired;
         active.UpdatedAt = now;
-        await db.SaveChangesAsync();
-        active = null;
+        active = null;  // deferred save
     }
 
     if (active is null)
@@ -274,7 +273,6 @@ api.MapPost("/sessions/start", async (
             UpdatedAt = now
         };
         db.KioskSessions.Add(active);
-        await db.SaveChangesAsync();
     }
     else
     {
@@ -284,9 +282,9 @@ api.MapPost("/sessions/start", async (
         if (!string.IsNullOrWhiteSpace(TPL)) active.TemplateId = TPL;
         if (!string.IsNullOrWhiteSpace(prefillJson)) active.PrefillJson = prefillJson;
         active.UpdatedAt = now;
-        await db.SaveChangesAsync();
     }
 
+    await db.SaveChangesAsync();
     var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, active.EditToken, KID);
     await NotifySessionStartedAsync(hub, active, KID, scanUrl);
 
@@ -384,14 +382,14 @@ api.MapPost("/consents", async (
         Language = language,
         TermsEn = await LoadConsentTermsAsync(env, "en", checkInTime, ct),
         TermsAr = await LoadConsentTermsAsync(env, "ar", checkInTime, ct),
-        Status = "waiting",
+        Status = ConsentStatus.Waiting,
         CreatedAt = now,
         UpdatedAt = now
     };
 
     db.ConsentRequests.Add(request);
     await db.SaveChangesAsync(ct);
-    await NotifyConsentChangedAsync(hub, request.Kid, request.Id, "waiting");
+    await NotifyConsentChangedAsync(hub, request.Kid, request.Id, ConsentStatus.Waiting);
 
     return Results.Ok(ToConsentDto(request));
 });
@@ -408,7 +406,7 @@ api.MapGet("/consents/{id:int}/signature", async Task<IResult> (int id, AppDb db
     var request = await db.ConsentRequests.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
     if (request is null) return Results.NotFound(new { error = "Consent request not found" });
 
-    if (!string.Equals(request.Status, "signed", StringComparison.OrdinalIgnoreCase) ||
+    if (request.Status != ConsentStatus.Signed ||
         string.IsNullOrWhiteSpace(request.SignatureImageDataUrl))
     {
         return Results.NotFound(new { error = "Signature is not available yet" });
@@ -417,7 +415,7 @@ api.MapGet("/consents/{id:int}/signature", async Task<IResult> (int id, AppDb db
     return Results.Ok(new
     {
         id = request.Id,
-        status = request.Status,
+        status = request.Status.ToString(),
         pdfPath = request.PdfPath,
         signatureImage = request.SignatureImageDataUrl,
         signedAt = request.SignedAt
@@ -430,14 +428,14 @@ api.MapGet("/consents/active", async (string kid, AppDb db) =>
     if (string.IsNullOrWhiteSpace(KID)) return Results.BadRequest(new { error = "kid is required" });
 
     var request = await db.ConsentRequests
-        .Where(x => x.Kid.ToUpper() == KID && (x.Status == "waiting" || x.Status == "assigned"))
+        .Where(x => x.Kid.ToUpper() == KID && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
         .OrderBy(x => x.Id)
         .FirstOrDefaultAsync();
 
     if (request is null) return Results.NoContent();
-    if (request.Status == "waiting")
+    if (request.Status == ConsentStatus.Waiting)
     {
-        request.Status = "assigned";
+        request.Status = ConsentStatus.Assigned;
         request.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
     }
@@ -456,17 +454,17 @@ api.MapPost("/consents/{id:int}/sign", async (int id, ConsentSignDto body, AppDb
 
     var request = await db.ConsentRequests.FirstOrDefaultAsync(x => x.Id == id, ct);
     if (request is null) return Results.NotFound(new { error = "Consent request not found" });
-    if (request.Status == "signed") return Results.Conflict(new { error = "Consent request is already signed", pdfPath = request.PdfPath });
+    if (request.Status == ConsentStatus.Signed) return Results.Conflict(new { error = "Consent request is already signed", pdfPath = request.PdfPath });
 
     request.Accepted = true;
     request.Language = NormalizeConsentLanguage(body.language ?? request.Language);
     request.SignatureImageDataUrl = body.signatureImage;
     request.SignedAt = DateTime.UtcNow;
-    request.Status = "signed";
+    request.Status = ConsentStatus.Signed;
     request.PdfPath = await pdfWriter.WriteAsync(request, ct);
     await db.SaveChangesAsync(ct);
 
-    await NotifyConsentChangedAsync(hub, request.Kid, request.Id, "signed", request.PdfPath);
+    await NotifyConsentChangedAsync(hub, request.Kid, request.Id, ConsentStatus.Signed, request.PdfPath);
     return Results.Ok(new { ok = true, id = request.Id, pdfPath = request.PdfPath });
 });
 
@@ -581,10 +579,8 @@ api.MapPost("/mobile/save", async (MobileSaveDto body, AppDb db, IHubContext<Gue
 
     Guest? guest = null;
 
-    guest = new Guest { DataJson = guestDataJson, CreatedAt = now, UpdatedAt = now };
+    guest = new Guest { DataJson = guestDataJson };
     db.Guests.Add(guest);
-
-    await db.SaveChangesAsync();
 
     s.GuestId = guest.Id;
     s.Status = SessionStatus.Completed;
@@ -607,12 +603,12 @@ app.Run();
 
 
 
-static string BuildGuestFormConfigJson(string tplId, string templateJson, string prefillJson)
-{
-    var safeTemplate = FilterTemplateForGuest(templateJson);
-    var safePrefill = FilterJsonObjectByGuestVisibleFields(prefillJson, templateJson);
-    return $"{{\"templateId\":{JsonSerializer.Serialize(tplId)},\"template\":{safeTemplate},\"prefill\":{safePrefill}}}";
-}
+    static string BuildGuestFormConfigJson(string tplId, string templateJson, string prefillJson)
+    {
+        var safeTemplate = FilterTemplateForGuest(templateJson);
+        var safePrefill = FilterJsonObjectByGuestVisibleFields(prefillJson, templateJson);
+        return JsonSerializer.Serialize(new { templateId = tplId, template = JsonDocument.Parse(safeTemplate).RootElement, prefill = JsonDocument.Parse(safePrefill).RootElement });
+    }
 
 static string FilterTemplateForGuest(string templateJson)
 {
@@ -796,9 +792,7 @@ END
 ");
 
 
-    if (db.Database.IsSqlServer())
-    {
-        await db.Database.ExecuteSqlRawAsync(@"
+    await db.Database.ExecuteSqlRawAsync(@"
 IF COL_LENGTH(N'dbo.ConsentRequests', N'IdentityNumber') IS NULL
 BEGIN
     ALTER TABLE [dbo].[ConsentRequests]
@@ -811,7 +805,6 @@ BEGIN
     ADD [CheckInTime] nvarchar(50) NOT NULL CONSTRAINT [DF_ConsentRequests_CheckInTime] DEFAULT N'';
 END
 ");
-    }
     }
 }
 
@@ -863,14 +856,14 @@ static object ToConsentDto(ConsentRequest request)
     };
 }
 
-static Task NotifyConsentChangedAsync(IHubContext<GuestHub> hub, string kid, int consentId, string status, string? pdfPath = null)
+static Task NotifyConsentChangedAsync(IHubContext<GuestHub> hub, string kid, int consentId, ConsentStatus status, string? pdfPath = null)
 {
     var normalizedKid = GuestHub.NormalizeKid(kid);
     return hub.Clients.Group(GuestHub.KioskGroup(normalizedKid)).SendAsync("consentChanged", new
     {
         kid = normalizedKid,
         consentId,
-        status,
+        status = status.ToString(),
         pdfPath
     });
 }
@@ -882,7 +875,7 @@ static async Task<IResult> CancelActiveConsentsForKidAsync(string kid, AppDb db,
         return Results.BadRequest(new { error = "kid is required" });
 
     var requests = await db.ConsentRequests
-        .Where(x => x.Kid.ToUpper() == KID && (x.Status == "waiting" || x.Status == "assigned"))
+        .Where(x => x.Kid.ToUpper() == KID && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
         .OrderBy(x => x.Id)
         .ToListAsync();
 
@@ -892,7 +885,7 @@ static async Task<IResult> CancelActiveConsentsForKidAsync(string kid, AppDb db,
     var now = DateTime.UtcNow;
     foreach (var request in requests)
     {
-        request.Status = "cancelled";
+        request.Status = ConsentStatus.Cancelled;
         request.UpdatedAt = now;
     }
 
@@ -900,7 +893,7 @@ static async Task<IResult> CancelActiveConsentsForKidAsync(string kid, AppDb db,
 
     foreach (var request in requests)
     {
-        await NotifyConsentChangedAsync(hub, request.Kid, request.Id, "cancelled");
+        await NotifyConsentChangedAsync(hub, request.Kid, request.Id, ConsentStatus.Cancelled);
     }
 
     return Results.Ok(new { ok = true, cancelledCount = requests.Count });

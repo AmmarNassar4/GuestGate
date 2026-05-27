@@ -12,7 +12,7 @@ namespace GuestGate.Api.Models
         public string Language { get; set; } = "en";
         public string TermsEn { get; set; } = string.Empty;
         public string TermsAr { get; set; } = string.Empty;
-        public string Status { get; set; } = "waiting";
+        public ConsentStatus Status { get; set; } = ConsentStatus.Waiting;
         public bool Accepted { get; set; }
         public string? SignatureImageDataUrl { get; set; }
         public string? PdfPath { get; set; }
