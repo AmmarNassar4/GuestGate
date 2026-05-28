@@ -23,7 +23,10 @@ namespace GuestGate.Api.Data
             b.Entity<ConsentRequest>().Property(x => x.CheckInTime).HasMaxLength(50);
             b.Entity<ConsentRequest>().Property(x => x.Kid).HasMaxLength(50);
             b.Entity<ConsentRequest>().Property(x => x.Language).HasMaxLength(5);
-            b.Entity<ConsentRequest>().Property(x => x.Status).HasConversion<byte>();
+            b.Entity<ConsentRequest>().Property(x => x.Status)
+                .HasConversion(
+                    v => v.ToString(),
+                    v => (ConsentStatus)Enum.Parse(typeof(ConsentStatus), v));
         }
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
