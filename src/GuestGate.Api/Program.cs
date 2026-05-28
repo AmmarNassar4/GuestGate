@@ -849,7 +849,7 @@ static object ToConsentDto(ConsentRequest request)
         language = NormalizeConsentLanguage(request.Language),
         termsEn = request.TermsEn,
         termsAr = request.TermsAr,
-        status = request.Status,
+        status = request.Status.ToString(),
         accepted = request.Accepted,
         signedAt = request.SignedAt,
         pdfPath = request.PdfPath
