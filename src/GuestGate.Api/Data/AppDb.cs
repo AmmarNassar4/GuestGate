@@ -27,7 +27,7 @@ namespace GuestGate.Api.Data
                 .HasMaxLength(20)
                 .HasConversion(
                     v => v.ToString().ToLowerInvariant(),
-                    v => Enum.Parse<ConsentStatus>(v, ignoreCase: true));
+                    v => Enum.Parse<ConsentStatus>(v, true));
         }
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
