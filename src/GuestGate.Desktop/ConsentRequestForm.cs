@@ -28,6 +28,8 @@ namespace GuestGate.Desktop
         private readonly TextBox _baseUrlBox;
         private readonly TextBox _kidBox;
         private readonly TextBox _guestNameBox;
+        private readonly TextBox _identityNumberBox;
+        private readonly TextBox _checkInTimeBox;
         private readonly ComboBox _languageBox;
         private readonly TextBox _termsEnBox;
         private readonly TextBox _termsArBox;
@@ -43,17 +45,19 @@ namespace GuestGate.Desktop
 
             Text = "GuestGate — Consent approval request";
             StartPosition = FormStartPosition.CenterParent;
-            Width = 720;
-            Height = 560;
-            MinimumSize = new Size(640, 480);
+            Width = 760;
+            Height = 620;
+            MinimumSize = new Size(680, 540);
 
             var root = new TableLayoutPanel();
             root.Dock = DockStyle.Fill;
             root.Padding = new Padding(12);
             root.ColumnCount = 2;
-            root.RowCount = 7;
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+            root.RowCount = 9;
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
@@ -66,6 +70,8 @@ namespace GuestGate.Desktop
             _baseUrlBox = new TextBox { Dock = DockStyle.Fill, Text = string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:5264" : baseUrl.TrimEnd('/') };
             _kidBox = new TextBox { Dock = DockStyle.Left, Width = 140, Text = NormalizeKid(_getKid()) };
             _guestNameBox = new TextBox { Dock = DockStyle.Fill };
+            _identityNumberBox = new TextBox { Dock = DockStyle.Fill };
+            _checkInTimeBox = new TextBox { Dock = DockStyle.Left, Width = 180, Text = DateTime.Now.ToString("HH:mm") };
             _languageBox = new ComboBox { Dock = DockStyle.Left, Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
             _languageBox.Items.Add(new LanguageItem("en", "English"));
             _languageBox.Items.Add(new LanguageItem("ar", "Arabic / العربية"));
@@ -79,19 +85,25 @@ namespace GuestGate.Desktop
             AddRow(root, 0, "Base URL:", _baseUrlBox);
             AddRow(root, 1, "Tablet (kid):", _kidBox);
             AddRow(root, 2, "Guest name:", _guestNameBox);
-            AddRow(root, 3, "Language:", _languageBox);
-            AddRow(root, 4, "Terms EN:", _termsEnBox);
-            AddRow(root, 5, "Terms AR:", _termsArBox);
+            AddRow(root, 3, "Identity no:", _identityNumberBox);
+            AddRow(root, 4, "Check-in time:", _checkInTimeBox);
+            AddRow(root, 5, "Language:", _languageBox);
+            AddRow(root, 6, "Terms EN:", _termsEnBox);
+            AddRow(root, 7, "Terms AR:", _termsArBox);
 
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
             actions.Controls.Add(_sendBtn);
             actions.Controls.Add(_openKioskBtn);
             actions.Controls.Add(_statusLabel);
-            root.Controls.Add(actions, 1, 6);
+            root.Controls.Add(actions, 1, 8);
 
             _sendBtn.Click += async delegate { await SendAsync(); };
             _openKioskBtn.Click += delegate { OpenConsentKiosk(); };
-            Shown += delegate { _kidBox.Text = NormalizeKid(_getKid()); };
+            Shown += delegate
+            {
+                _kidBox.Text = NormalizeKid(_getKid());
+                if (string.IsNullOrWhiteSpace(_checkInTimeBox.Text)) _checkInTimeBox.Text = DateTime.Now.ToString("HH:mm");
+            };
         }
 
         private static void AddRow(TableLayoutPanel table, int row, string label, Control input)
@@ -104,15 +116,19 @@ namespace GuestGate.Desktop
         {
             var baseUrl = (_baseUrlBox.Text ?? string.Empty).Trim().TrimEnd('/');
             var kid = NormalizeKid(_kidBox.Text);
+            var checkInTime = (_checkInTimeBox.Text ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(baseUrl)) { SetStatus("Base URL is required.", true); return; }
             if (string.IsNullOrWhiteSpace(kid)) { SetStatus("Tablet kid is required.", true); return; }
+            if (string.IsNullOrWhiteSpace(checkInTime)) { SetStatus("Check-in time is required.", true); return; }
 
             var language = (_languageBox.SelectedItem as LanguageItem)?.Code ?? "en";
             var body = new JObject
             {
                 ["kid"] = kid,
                 ["guestName"] = (_guestNameBox.Text ?? string.Empty).Trim(),
+                ["identityNumber"] = (_identityNumberBox.Text ?? string.Empty).Trim(),
                 ["language"] = language,
+                ["checkInTime"] = checkInTime,
                 ["termsEn"] = (_termsEnBox.Text ?? string.Empty).Trim(),
                 ["termsAr"] = (_termsArBox.Text ?? string.Empty).Trim()
             };
