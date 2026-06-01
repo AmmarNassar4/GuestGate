@@ -32,6 +32,49 @@ namespace GuestGate.Api.Data
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
+            var pendingGuestLinks = ChangeTracker.Entries<KioskSession>()
+                .Where(e => (e.State == EntityState.Added || e.State == EntityState.Modified) && e.Entity.GuestId == 0)
+                .ToList();
+
+            var addedGuests = ChangeTracker.Entries<Guest>()
+                .Where(e => e.State == EntityState.Added)
+                .Select(e => e.Entity)
+                .ToList();
+
+            if (pendingGuestLinks.Count > 0 && addedGuests.Count == 1)
+            {
+                ApplyAuditTimestamps();
+
+                var sessionStates = pendingGuestLinks
+                    .Select(e => new { Entry = e, State = e.State })
+                    .ToList();
+
+                foreach (var sessionEntry in pendingGuestLinks)
+                {
+                    sessionEntry.State = EntityState.Unchanged;
+                }
+
+                var insertedGuests = await base.SaveChangesAsync(cancellationToken);
+
+                foreach (var sessionState in sessionStates)
+                {
+                    sessionState.Entry.Entity.GuestId = addedGuests[0].Id;
+                    sessionState.Entry.State = sessionState.State == EntityState.Added
+                        ? EntityState.Added
+                        : EntityState.Modified;
+                }
+
+                ApplyAuditTimestamps();
+                var linkedSessions = await base.SaveChangesAsync(cancellationToken);
+                return insertedGuests + linkedSessions;
+            }
+
+            ApplyAuditTimestamps();
+            return await base.SaveChangesAsync(cancellationToken);
+        }
+
+        private void ApplyAuditTimestamps()
+        {
             var now = DateTime.UtcNow;
             foreach (var e in ChangeTracker.Entries())
             {
@@ -58,7 +101,6 @@ namespace GuestGate.Api.Data
                     }
                 }
             }
-            return await base.SaveChangesAsync(cancellationToken);
         }
     }
 }
