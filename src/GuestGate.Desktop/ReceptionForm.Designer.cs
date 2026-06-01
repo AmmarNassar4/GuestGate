@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Windows.Forms;
 using System.Drawing;
@@ -30,6 +30,13 @@ namespace GuestGate.Desktop
         private ToolStripStatusLabel _msgLbl;
 
         private Timer _retryTimer;
+
+        // Legacy consent controls kept for the old SendConsentRequestAsync method.
+        // The active consent flow now opens ConsentRequestForm from the launcher button.
+        private ComboBox _consentLanguage = new ComboBox();
+        private TextBox _consentGuestName = new TextBox();
+        private TextBox _consentTermsEn = new TextBox();
+        private TextBox _consentTermsAr = new TextBox();
 
         /// <summary>
         /// Clean up any resources being used.
