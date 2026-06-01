@@ -15,14 +15,14 @@ internal static class TemplatesEndpoints
             return Results.Ok(ids);
         });
 
-        app.MapGet("/admin/templates/{id}", async (string id, AppDb db) =>
+        app.MapGet("/admin/templates/{id}", async Task<IResult> (string id, AppDb db) =>
         {
             var t = await db.Templates.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
             if (t is null) return Results.NotFound(new { error = "Template not found" });
             return Results.Content(t.DataJson, "application/json");
         });
 
-        app.MapPost("/admin/templates", async (AppDb db, HttpRequest req) =>
+        app.MapPost("/admin/templates", async Task<IResult> (AppDb db, HttpRequest req) =>
         {
             using var doc = await JsonDocument.ParseAsync(req.Body);
             var root = doc.RootElement;
