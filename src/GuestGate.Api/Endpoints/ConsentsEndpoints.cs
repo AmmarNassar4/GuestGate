@@ -13,7 +13,7 @@ internal static class ConsentsEndpoints
     {
         var api = app.MapGroup("/api");
 
-        api.MapPost("/consents", async (ConsentCreateDto body, AppDb db, IWebHostEnvironment env, IHubContext<GuestHub> hub, CancellationToken ct) =>
+        api.MapPost("/consents", async Task<IResult> (ConsentCreateDto body, AppDb db, IWebHostEnvironment env, IHubContext<GuestHub> hub, CancellationToken ct) =>
         {
             if (body is null) return Results.BadRequest(new { error = "Invalid payload" });
 
@@ -76,7 +76,7 @@ internal static class ConsentsEndpoints
             });
         });
 
-        api.MapGet("/consents/active", async (string kid, AppDb db) =>
+        api.MapGet("/consents/active", async Task<IResult> (string kid, AppDb db) =>
         {
             var normalizedKid = GuestHub.NormalizeKid(kid);
             if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
@@ -100,7 +100,7 @@ internal static class ConsentsEndpoints
         api.MapDelete("/consents/active", CancelActiveConsentsForKidAsync);
         app.MapPost("/api/consents/cancel", CancelActiveConsentsForKidAsync);
 
-        api.MapPost("/consents/{id:int}/sign", async (int id, ConsentSignDto body, AppDb db, IConsentPdfWriter pdfWriter, IHubContext<GuestHub> hub, CancellationToken ct) =>
+        api.MapPost("/consents/{id:int}/sign", async Task<IResult> (int id, ConsentSignDto body, AppDb db, IConsentPdfWriter pdfWriter, IHubContext<GuestHub> hub, CancellationToken ct) =>
         {
             if (body is null) return Results.BadRequest(new { error = "Invalid payload" });
             if (!body.accepted) return Results.BadRequest(new { error = "The terms must be accepted before signing." });
