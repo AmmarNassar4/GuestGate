@@ -27,13 +27,12 @@ internal static class GuestFlowEndpoints
             return Results.Content(GuestFormBuilder.BuildGuestFormConfigJson(tplId, t.DataJson, prefill), "application/json");
         });
 
-        app.MapGet("/tablet/{kid}/form-config", async Task<IResult> (string kid, AppDb db) =>
+        app.MapGet("/tablet/{kid:int}/form-config", async Task<IResult> (int kid, AppDb db) =>
         {
-            var normalizedKid = GuestHub.NormalizeKid(kid);
-            if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
+            if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             var s = await db.KioskSessions
-                .Where(x => x.Kid == normalizedKid && x.Status == SessionStatus.Active)
+                .Where(x => x.Kid == kid && x.Status == SessionStatus.Active)
                 .OrderByDescending(x => x.Id)
                 .FirstOrDefaultAsync();
 
