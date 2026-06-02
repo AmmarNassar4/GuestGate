@@ -14,16 +14,16 @@ internal static class SessionManagementEndpoints
     {
         var api = app.MapGroup("/api");
 
-        api.MapPost("/sessions/start", async Task<IResult> (HttpRequest req, string? kid, string? templateId, AppDb db, IOptions<KioskOptions> opt, IHubContext<GuestHub> hub) =>
+        api.MapPost("/sessions/start", async Task<IResult> (HttpRequest req, int? kid, string? templateId, AppDb db, IOptions<KioskOptions> opt, IHubContext<GuestHub> hub) =>
         {
             SessionStartDto? body = null;
             try { body = await req.ReadFromJsonAsync<SessionStartDto>(); } catch { }
 
-            var normalizedKid = GuestHub.NormalizeKid(body?.kid ?? kid);
+            var kioskId = body is not null && body.kid > 0 ? body.kid : kid.GetValueOrDefault();
             var tpl = (body?.templateId ?? templateId)?.Trim();
             var prefillJson = body?.prefill is JsonElement p ? p.GetRawText() : null;
 
-            if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
+            if (kioskId <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             if (!string.IsNullOrWhiteSpace(tpl))
             {
@@ -33,7 +33,7 @@ internal static class SessionManagementEndpoints
 
             var now = DateTime.UtcNow;
             var active = await db.KioskSessions
-                .Where(s => s.Kid == normalizedKid && s.Status == SessionStatus.Active)
+                .Where(s => s.Kid == kioskId && s.Status == SessionStatus.Active)
                 .OrderByDescending(s => s.Id)
                 .FirstOrDefaultAsync();
 
@@ -48,7 +48,7 @@ internal static class SessionManagementEndpoints
             {
                 active = new KioskSession
                 {
-                    Kid = normalizedKid,
+                    Kid = kioskId,
                     EditToken = Guid.NewGuid(),
                     Status = SessionStatus.Active,
                     ExpiresAt = now.AddMinutes(opt.Value.SessionMinutes),
@@ -61,26 +61,25 @@ internal static class SessionManagementEndpoints
             }
             else
             {
-                active.Kid = GuestHub.NormalizeKid(active.Kid);
+                active.Kid = kioskId;
                 if (!string.IsNullOrWhiteSpace(tpl)) active.TemplateId = tpl;
                 if (!string.IsNullOrWhiteSpace(prefillJson)) active.PrefillJson = prefillJson;
                 active.UpdatedAt = now;
             }
 
             await db.SaveChangesAsync();
-            var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, active.EditToken, normalizedKid);
-            await NotifySessionStartedAsync(hub, active, normalizedKid, scanUrl);
-            return Results.Ok(new { sessionId = active.Id, kid = normalizedKid, et = active.EditToken, scanUrl, expiresAt = active.ExpiresAt });
+            var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, active.EditToken, kioskId);
+            await NotifySessionStartedAsync(hub, active, kioskId, scanUrl);
+            return Results.Ok(new { sessionId = active.Id, kid = kioskId, et = active.EditToken, scanUrl, expiresAt = active.ExpiresAt });
         });
 
-        api.MapGet("/sessions/active", async Task<IResult> (string kid, AppDb db, IOptions<KioskOptions> opt) =>
+        api.MapGet("/sessions/active", async Task<IResult> (int kid, AppDb db, IOptions<KioskOptions> opt) =>
         {
-            var normalizedKid = GuestHub.NormalizeKid(kid);
-            if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
+            if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             var now = DateTime.UtcNow;
             var s = await db.KioskSessions
-                .Where(x => x.Kid == normalizedKid && x.Status == SessionStatus.Active)
+                .Where(x => x.Kid == kid && x.Status == SessionStatus.Active)
                 .OrderByDescending(x => x.Id)
                 .FirstOrDefaultAsync();
 
@@ -93,18 +92,16 @@ internal static class SessionManagementEndpoints
                 return Results.NoContent();
             }
 
-            var responseKid = GuestHub.NormalizeKid(s.Kid);
-            var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, s.EditToken, responseKid);
-            return Results.Ok(new { sessionId = s.Id, kid = responseKid, et = s.EditToken, scanUrl, expiresAt = s.ExpiresAt });
+            var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, s.EditToken, s.Kid);
+            return Results.Ok(new { sessionId = s.Id, kid = s.Kid, et = s.EditToken, scanUrl, expiresAt = s.ExpiresAt });
         });
 
-        api.MapDelete("/sessions/active", async Task<IResult> (string kid, AppDb db, IHubContext<GuestHub> hub) =>
+        api.MapDelete("/sessions/active", async Task<IResult> (int kid, AppDb db, IHubContext<GuestHub> hub) =>
         {
-            var normalizedKid = GuestHub.NormalizeKid(kid);
-            if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
+            if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             var s = await db.KioskSessions
-                .Where(x => x.Kid == normalizedKid && x.Status == SessionStatus.Active)
+                .Where(x => x.Kid == kid && x.Status == SessionStatus.Active)
                 .OrderByDescending(x => x.Id)
                 .FirstOrDefaultAsync();
 
@@ -112,17 +109,16 @@ internal static class SessionManagementEndpoints
             s.Status = SessionStatus.Cancelled;
             s.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
-            await NotifySessionEndedAsync(hub, normalizedKid, s.Id, "cancelled");
+            await NotifySessionEndedAsync(hub, kid, s.Id, "cancelled");
             return Results.NoContent();
         });
 
-        app.MapPost("/api/sessions/cancel", async Task<IResult> (AppDb db, string kid, IHubContext<GuestHub> hub) =>
+        app.MapPost("/api/sessions/cancel", async Task<IResult> (AppDb db, int kid, IHubContext<GuestHub> hub) =>
         {
-            var normalizedKid = GuestHub.NormalizeKid(kid);
-            if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
+            if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             var s = await db.KioskSessions
-                .Where(x => x.Kid == normalizedKid && x.Status == SessionStatus.Active)
+                .Where(x => x.Kid == kid && x.Status == SessionStatus.Active)
                 .OrderByDescending(x => x.Id)
                 .FirstOrDefaultAsync();
 
@@ -130,7 +126,7 @@ internal static class SessionManagementEndpoints
             s.Status = SessionStatus.Cancelled;
             s.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
-            await NotifySessionEndedAsync(hub, normalizedKid, s.Id, "cancelled");
+            await NotifySessionEndedAsync(hub, kid, s.Id, "cancelled");
             return Results.NoContent();
         });
 
@@ -148,19 +144,18 @@ internal static class SessionManagementEndpoints
         return app;
     }
 
-    private static string BuildScanUrl(string mobileBaseUrl, Guid editToken, string kid)
+    private static string BuildScanUrl(string mobileBaseUrl, Guid editToken, int kid)
     {
         var separator = mobileBaseUrl.Contains('?') ? "&" : "?";
-        return $"{mobileBaseUrl}{separator}et={editToken}&kid={Uri.EscapeDataString(GuestHub.NormalizeKid(kid))}";
+        return $"{mobileBaseUrl}{separator}et={editToken}&kid={kid}";
     }
 
-    private static Task NotifySessionStartedAsync(IHubContext<GuestHub> hub, KioskSession session, string kid, string scanUrl)
+    private static Task NotifySessionStartedAsync(IHubContext<GuestHub> hub, KioskSession session, int kid, string scanUrl)
     {
-        var normalizedKid = GuestHub.NormalizeKid(kid);
-        return hub.Clients.Group(GuestHub.KioskGroup(normalizedKid)).SendAsync("sessionStarted", new
+        return hub.Clients.Group(GuestHub.KioskGroup(kid)).SendAsync("sessionStarted", new
         {
             sessionId = session.Id,
-            kid = normalizedKid,
+            kid,
             et = session.EditToken,
             scanUrl,
             expiresAt = session.ExpiresAt,
@@ -168,9 +163,8 @@ internal static class SessionManagementEndpoints
         });
     }
 
-    private static Task NotifySessionEndedAsync(IHubContext<GuestHub> hub, string kid, int sessionId, string reason)
+    private static Task NotifySessionEndedAsync(IHubContext<GuestHub> hub, int kid, int sessionId, string reason)
     {
-        var normalizedKid = GuestHub.NormalizeKid(kid);
-        return hub.Clients.Group(GuestHub.KioskGroup(normalizedKid)).SendAsync("sessionEnded", new { kid = normalizedKid, sessionId, reason });
+        return hub.Clients.Group(GuestHub.KioskGroup(kid)).SendAsync("sessionEnded", new { kid, sessionId, reason });
     }
 }
