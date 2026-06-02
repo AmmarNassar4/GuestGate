@@ -4,7 +4,11 @@ namespace GuestGate.Api.Hubs
 {
     public class GuestHub : Hub
     {
-        public static string NormalizeKid(string? kid) => (kid ?? string.Empty).Trim().ToUpperInvariant();
+        public static string NormalizeKid(string? kid)
+        {
+            var value = (kid ?? string.Empty).Trim();
+            return value.Length > 0 && value.All(char.IsDigit) ? value : string.Empty;
+        }
 
         public static string KioskGroup(string? kid) => $"kiosk:{NormalizeKid(kid)}";
 
