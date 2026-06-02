@@ -22,43 +22,50 @@ namespace GuestGate.Api.Services
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
-                try
+                while (!stoppingToken.IsCancellationRequested)
                 {
-                    using var scope = _scopeFactory.CreateScope();
-                    var db = scope.ServiceProvider.GetRequiredService<AppDb>();
-                    var changed = await db.ConsentRequests.AsNoTracking()
-                        .Where(x => x.UpdatedAt > _lastSeenUtc)
-                        .OrderBy(x => x.UpdatedAt)
-                        .Select(x => new { x.Id, x.Kid, x.Status, x.UpdatedAt })
-                        .ToListAsync(stoppingToken);
-
-                    if (_firstPoll && changed.Count == 0)
+                    try
                     {
-                        // No consents yet — set watermark to current time so startup doesn't re-broadcast older rows forever.
-                        _lastSeenUtc = DateTime.UtcNow;
-                    }
+                        using var scope = _scopeFactory.CreateScope();
+                        var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+                        var changed = await db.ConsentRequests.AsNoTracking()
+                            .Where(x => x.UpdatedAt > _lastSeenUtc)
+                            .OrderBy(x => x.UpdatedAt)
+                            .Select(x => new { x.Id, x.Kid, x.Status, x.UpdatedAt })
+                            .ToListAsync(stoppingToken);
 
-                    foreach (var item in changed)
-                    {
-                        await _hub.Clients.Group(GuestHub.KioskGroup(item.Kid)).SendAsync("consentChanged", new
+                        if (_firstPoll && changed.Count == 0)
                         {
-                            kid = GuestHub.NormalizeKid(item.Kid),
-                            consentId = item.Id,
-                            status = item.Status.ToString()
-                        }, stoppingToken);
-                        if (item.UpdatedAt > _lastSeenUtc) _lastSeenUtc = item.UpdatedAt;
+                            // No consents yet; set watermark to current time so startup does not re-broadcast older rows forever.
+                            _lastSeenUtc = DateTime.UtcNow;
+                        }
+
+                        foreach (var item in changed)
+                        {
+                            await _hub.Clients.Group(GuestHub.KioskGroup(item.Kid)).SendAsync("consentChanged", new
+                            {
+                                kid = GuestHub.NormalizeKid(item.Kid),
+                                consentId = item.Id,
+                                status = item.Status.ToString()
+                            }, stoppingToken);
+                            if (item.UpdatedAt > _lastSeenUtc) _lastSeenUtc = item.UpdatedAt;
+                        }
+
+                        _firstPoll = false;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger.LogWarning(ex, "ConsentWatcher polling failed.");
                     }
 
-                    _firstPoll = false;
+                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "ConsentWatcher polling failed.");
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("ConsentWatcher cancellation requested.");
             }
         }
     }
