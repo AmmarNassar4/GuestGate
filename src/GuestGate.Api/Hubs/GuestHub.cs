@@ -4,18 +4,18 @@ namespace GuestGate.Api.Hubs
 {
     public class GuestHub : Hub
     {
-        public static string NormalizeKid(string? kid)
+        public static bool TryParseKid(string? kid, out int value)
         {
-            var value = (kid ?? string.Empty).Trim();
-            return value.Length > 0 && value.All(char.IsDigit) ? value : string.Empty;
+            value = 0;
+            var text = (kid ?? string.Empty).Trim();
+            return int.TryParse(text, out value) && value > 0;
         }
 
-        public static string KioskGroup(string? kid) => $"kiosk:{NormalizeKid(kid)}";
+        public static string KioskGroup(int kid) => $"kiosk:{kid}";
 
         public override async Task OnConnectedAsync()
         {
-            var kid = NormalizeKid(Context.GetHttpContext()?.Request.Query["kid"].ToString());
-            if (!string.IsNullOrWhiteSpace(kid))
+            if (TryParseKid(Context.GetHttpContext()?.Request.Query["kid"].ToString(), out var kid))
                 await Groups.AddToGroupAsync(Context.ConnectionId, KioskGroup(kid));
             await base.OnConnectedAsync();
         }
