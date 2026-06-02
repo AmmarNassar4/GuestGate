@@ -12,6 +12,7 @@ namespace GuestGate.Api.Data
         protected override void OnModelCreating(ModelBuilder b)
         {
             b.Entity<Template>().HasKey(t => t.Id);
+            b.Entity<KioskSession>().Property(x => x.Kid).HasMaxLength(50);
             b.Entity<KioskSession>().HasIndex(x => x.EditToken).IsUnique();
             b.Entity<KioskSession>().HasIndex(x => new { x.Kid, x.Status });
             b.Entity<KioskSession>().HasIndex(x => new { x.Status, x.ExpiresAt });
