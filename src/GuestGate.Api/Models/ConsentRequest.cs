@@ -5,7 +5,7 @@ namespace GuestGate.Api.Models
     public class ConsentRequest
     {
         public int Id { get; set; }
-        public string Kid { get; set; } = default!;
+        public int Kid { get; set; }
         public string GuestName { get; set; } = string.Empty;
         public string IdentityNumber { get; set; } = string.Empty;
         public string CheckInTime { get; set; } = string.Empty;
