@@ -33,7 +33,7 @@ internal static class SessionManagementEndpoints
 
             var now = DateTime.UtcNow;
             var active = await db.KioskSessions
-                .Where(s => s.Kid.ToUpper() == normalizedKid && s.Status == SessionStatus.Active)
+                .Where(s => s.Kid == normalizedKid && s.Status == SessionStatus.Active)
                 .OrderByDescending(s => s.Id)
                 .FirstOrDefaultAsync();
 
@@ -80,7 +80,7 @@ internal static class SessionManagementEndpoints
 
             var now = DateTime.UtcNow;
             var s = await db.KioskSessions
-                .Where(x => x.Kid.ToUpper() == normalizedKid && x.Status == SessionStatus.Active)
+                .Where(x => x.Kid == normalizedKid && x.Status == SessionStatus.Active)
                 .OrderByDescending(x => x.Id)
                 .FirstOrDefaultAsync();
 
@@ -104,7 +104,7 @@ internal static class SessionManagementEndpoints
             if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
 
             var s = await db.KioskSessions
-                .Where(x => x.Kid.ToUpper() == normalizedKid && x.Status == SessionStatus.Active)
+                .Where(x => x.Kid == normalizedKid && x.Status == SessionStatus.Active)
                 .OrderByDescending(x => x.Id)
                 .FirstOrDefaultAsync();
 
@@ -122,7 +122,7 @@ internal static class SessionManagementEndpoints
             if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
 
             var s = await db.KioskSessions
-                .Where(x => x.Kid.ToUpper() == normalizedKid && x.Status == SessionStatus.Active)
+                .Where(x => x.Kid == normalizedKid && x.Status == SessionStatus.Active)
                 .OrderByDescending(x => x.Id)
                 .FirstOrDefaultAsync();
 
