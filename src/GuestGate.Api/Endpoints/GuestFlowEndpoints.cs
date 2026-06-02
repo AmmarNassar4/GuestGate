@@ -14,7 +14,7 @@ internal static class GuestFlowEndpoints
     {
         var api = app.MapGroup("/api");
 
-        app.MapGet("/api/mobile/form-config", async (Guid et, AppDb db) =>
+        app.MapGet("/api/mobile/form-config", async Task<IResult> (Guid et, AppDb db) =>
         {
             var s = await db.KioskSessions.FirstOrDefaultAsync(x => x.EditToken == et && x.Status == SessionStatus.Active);
             if (s is null) return Results.NotFound(new { error = "Session not found" });
@@ -27,7 +27,7 @@ internal static class GuestFlowEndpoints
             return Results.Content(GuestFormBuilder.BuildGuestFormConfigJson(tplId, t.DataJson, prefill), "application/json");
         });
 
-        app.MapGet("/tablet/{kid}/form-config", async (string kid, AppDb db) =>
+        app.MapGet("/tablet/{kid}/form-config", async Task<IResult> (string kid, AppDb db) =>
         {
             var normalizedKid = GuestHub.NormalizeKid(kid);
             if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
@@ -47,7 +47,7 @@ internal static class GuestFlowEndpoints
             return Results.Content(GuestFormBuilder.BuildGuestFormConfigJson(tplId, t.DataJson, prefill), "application/json");
         });
 
-        api.MapGet("/sessions/{id:int}/result", async (int id, AppDb db) =>
+        api.MapGet("/sessions/{id:int}/result", async Task<IResult> (int id, AppDb db) =>
         {
             var s = await db.KioskSessions.AsNoTracking()
                 .Include(x => x.Guest)
@@ -73,7 +73,7 @@ internal static class GuestFlowEndpoints
             });
         });
 
-        api.MapGet("/sessions/by-token", async (Guid et, AppDb db) =>
+        api.MapGet("/sessions/by-token", async Task<IResult> (Guid et, AppDb db) =>
         {
             var s = await db.KioskSessions.AsNoTracking()
                 .Include(x => x.Guest)
@@ -99,7 +99,7 @@ internal static class GuestFlowEndpoints
             });
         });
 
-        api.MapPost("/mobile/save", async (MobileSaveDto body, AppDb db, IHubContext<GuestHub> hub) =>
+        api.MapPost("/mobile/save", async Task<IResult> (MobileSaveDto body, AppDb db, IHubContext<GuestHub> hub) =>
         {
             if (body is null || body.et == Guid.Empty) return Results.BadRequest(new { error = "Invalid payload" });
 
