@@ -82,7 +82,7 @@ internal static class ConsentsEndpoints
             if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
 
             var request = await db.ConsentRequests
-                .Where(x => x.Kid.ToUpper() == normalizedKid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
+                .Where(x => x.Kid == normalizedKid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
                 .OrderBy(x => x.Id)
                 .FirstOrDefaultAsync();
 
@@ -162,7 +162,7 @@ internal static class ConsentsEndpoints
         if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
 
         var requests = await db.ConsentRequests
-            .Where(x => x.Kid.ToUpper() == normalizedKid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
+            .Where(x => x.Kid == normalizedKid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
             .OrderBy(x => x.Id)
             .ToListAsync();
 
