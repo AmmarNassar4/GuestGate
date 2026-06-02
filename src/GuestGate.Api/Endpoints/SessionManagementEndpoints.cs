@@ -14,7 +14,7 @@ internal static class SessionManagementEndpoints
     {
         var api = app.MapGroup("/api");
 
-        api.MapPost("/sessions/start", async (HttpRequest req, string? kid, string? templateId, AppDb db, IOptions<KioskOptions> opt, IHubContext<GuestHub> hub) =>
+        api.MapPost("/sessions/start", async Task<IResult> (HttpRequest req, string? kid, string? templateId, AppDb db, IOptions<KioskOptions> opt, IHubContext<GuestHub> hub) =>
         {
             SessionStartDto? body = null;
             try { body = await req.ReadFromJsonAsync<SessionStartDto>(); } catch { }
@@ -73,7 +73,7 @@ internal static class SessionManagementEndpoints
             return Results.Ok(new { sessionId = active.Id, kid = normalizedKid, et = active.EditToken, scanUrl, expiresAt = active.ExpiresAt });
         });
 
-        api.MapGet("/sessions/active", async (string kid, AppDb db, IOptions<KioskOptions> opt) =>
+        api.MapGet("/sessions/active", async Task<IResult> (string kid, AppDb db, IOptions<KioskOptions> opt) =>
         {
             var normalizedKid = GuestHub.NormalizeKid(kid);
             if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
@@ -98,7 +98,7 @@ internal static class SessionManagementEndpoints
             return Results.Ok(new { sessionId = s.Id, kid = responseKid, et = s.EditToken, scanUrl, expiresAt = s.ExpiresAt });
         });
 
-        api.MapDelete("/sessions/active", async (string kid, AppDb db, IHubContext<GuestHub> hub) =>
+        api.MapDelete("/sessions/active", async Task<IResult> (string kid, AppDb db, IHubContext<GuestHub> hub) =>
         {
             var normalizedKid = GuestHub.NormalizeKid(kid);
             if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
@@ -116,7 +116,7 @@ internal static class SessionManagementEndpoints
             return Results.NoContent();
         });
 
-        app.MapPost("/api/sessions/cancel", async (AppDb db, string kid, IHubContext<GuestHub> hub) =>
+        app.MapPost("/api/sessions/cancel", async Task<IResult> (AppDb db, string kid, IHubContext<GuestHub> hub) =>
         {
             var normalizedKid = GuestHub.NormalizeKid(kid);
             if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
@@ -134,7 +134,7 @@ internal static class SessionManagementEndpoints
             return Results.NoContent();
         });
 
-        api.MapPut("/sessions/prefill", async (Guid et, HttpRequest req, AppDb db) =>
+        api.MapPut("/sessions/prefill", async Task<IResult> (Guid et, HttpRequest req, AppDb db) =>
         {
             var s = await db.KioskSessions.FirstOrDefaultAsync(x => x.EditToken == et && x.Status == SessionStatus.Active);
             if (s is null) return Results.NotFound(new { error = "Active session not found" });
