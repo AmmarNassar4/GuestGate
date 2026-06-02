@@ -33,7 +33,7 @@ internal static class GuestFlowEndpoints
             if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
 
             var s = await db.KioskSessions
-                .Where(x => x.Kid.ToUpper() == normalizedKid && x.Status == SessionStatus.Active)
+                .Where(x => x.Kid == normalizedKid && x.Status == SessionStatus.Active)
                 .OrderByDescending(x => x.Id)
                 .FirstOrDefaultAsync();
 
