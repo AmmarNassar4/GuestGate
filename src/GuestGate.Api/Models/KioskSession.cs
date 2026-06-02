@@ -4,7 +4,7 @@ namespace GuestGate.Api.Models
     public class KioskSession
     {
         public int Id { get; set; }
-        public string Kid { get; set; } = default!;
+        public int Kid { get; set; }
         public Guid EditToken { get; set; }
         public int? GuestId { get; set; }
         public Guest? Guest { get; set; }
