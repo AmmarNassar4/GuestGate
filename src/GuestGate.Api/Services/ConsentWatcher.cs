@@ -46,7 +46,7 @@ namespace GuestGate.Api.Services
                         {
                             await _hub.Clients.Group(GuestHub.KioskGroup(item.Kid)).SendAsync("consentChanged", new
                             {
-                                kid = GuestHub.NormalizeKid(item.Kid),
+                                kid = item.Kid,
                                 consentId = item.Id,
                                 status = item.Status.ToString()
                             }, stoppingToken);
