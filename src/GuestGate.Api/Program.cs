@@ -75,7 +75,7 @@ app.UseCors();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.MapGet("/consent", (HttpContext http) => Results.Redirect("/index.html" + http.Request.QueryString));
+app.MapGet("/consent", (HttpContext http) => Results.Redirect("/kiosk.html" + http.Request.QueryString));
 app.MapHub<GuestHub>("/hubs/guest");
 
 app.MapDiagnosticsEndpoints(app.Environment);
