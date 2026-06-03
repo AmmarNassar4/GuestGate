@@ -45,7 +45,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHostedService<SessionExpiryWorker>();
 builder.Services.AddScoped<IConsentPdfWriter, ConsentPdfWriter>();
 
-if (builder.Configuration.GetValue<bool>("SqlDependency:Enabled"))
+if (builder.Configuration.GetValue<bool>("ConsentWatcher:FallbackEnabled"))
 {
     builder.Services.AddHostedService<ConsentWatcher>();
 }
@@ -83,6 +83,7 @@ app.MapTemplatesEndpoints();
 app.MapSessionManagementEndpoints();
 app.MapGuestFlowEndpoints();
 app.MapConsentsEndpoints();
+app.MapKioskStateEndpoints();
 
 app.MapGet("/api/kiosk/screensaver", (IConfiguration cfg) =>
 {
