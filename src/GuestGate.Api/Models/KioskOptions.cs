@@ -5,6 +5,9 @@ namespace GuestGate.Api.Models
         public string MobileBaseUrl { get; set; } = default!;
         public int SessionMinutes { get; set; }
         public int IdleToScreensaverMs { get; set; } = 120000;
+        public int IdlePollMs { get; set; } = 5000;
+        public int ActivePollMs { get; set; } = 3000;
+        public int ConsentPollMs { get; set; } = 1000;
         public ScreensaverOptions Screensaver { get; set; } = new();
     }
 
