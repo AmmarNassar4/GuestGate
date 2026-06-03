@@ -41,7 +41,7 @@ namespace GuestGate.Desktop
 
         public ConsentRequestForm(string baseUrl, Func<string> getKid)
         {
-            _getKid = getKid ?? (() => "K1");
+            _getKid = getKid ?? (() => "1");
 
             Text = "GuestGate — Consent approval request";
             StartPosition = FormStartPosition.CenterParent;
@@ -115,10 +115,10 @@ namespace GuestGate.Desktop
         private async Task SendAsync()
         {
             var baseUrl = (_baseUrlBox.Text ?? string.Empty).Trim().TrimEnd('/');
-            var kid = NormalizeKid(_kidBox.Text);
+            var kidText = NormalizeKid(_kidBox.Text);
             var checkInTime = (_checkInTimeBox.Text ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(baseUrl)) { SetStatus("Base URL is required.", true); return; }
-            if (string.IsNullOrWhiteSpace(kid)) { SetStatus("Tablet kid is required.", true); return; }
+            if (!int.TryParse(kidText, out var kid) || kid <= 0) { SetStatus("Tablet kid must be a positive number.", true); return; }
             if (string.IsNullOrWhiteSpace(checkInTime)) { SetStatus("Check-in time is required.", true); return; }
 
             var language = (_languageBox.SelectedItem as LanguageItem)?.Code ?? "en";
@@ -183,7 +183,8 @@ namespace GuestGate.Desktop
 
         private static string NormalizeKid(string kid)
         {
-            return (kid ?? string.Empty).Trim().ToUpperInvariant();
+            var value = (kid ?? string.Empty).Trim();
+            return int.TryParse(value, out var parsed) && parsed > 0 ? parsed.ToString() : string.Empty;
         }
 
         private sealed class LanguageItem
