@@ -16,9 +16,7 @@ internal static class ConsentsEndpoints
         api.MapPost("/consents", async Task<IResult> (ConsentCreateDto body, AppDb db, IWebHostEnvironment env, IHubContext<GuestHub> hub, CancellationToken ct) =>
         {
             if (body is null) return Results.BadRequest(new { error = "Invalid payload" });
-
-            var normalizedKid = GuestHub.NormalizeKid(body.kid);
-            if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
+            if (body.kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             var checkInTime = (body.checkInTime ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(checkInTime)) return Results.BadRequest(new { error = "checkInTime is required" });
@@ -27,7 +25,7 @@ internal static class ConsentsEndpoints
             var now = DateTime.UtcNow;
             var request = new ConsentRequest
             {
-                Kid = normalizedKid,
+                Kid = body.kid,
                 GuestName = (body.guestName ?? string.Empty).Trim(),
                 IdentityNumber = (body.identityNumber ?? string.Empty).Trim(),
                 CheckInTime = checkInTime,
@@ -76,13 +74,12 @@ internal static class ConsentsEndpoints
             });
         });
 
-        api.MapGet("/consents/active", async Task<IResult> (string kid, AppDb db) =>
+        api.MapGet("/consents/active", async Task<IResult> (int kid, AppDb db) =>
         {
-            var normalizedKid = GuestHub.NormalizeKid(kid);
-            if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
+            if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             var request = await db.ConsentRequests
-                .Where(x => x.Kid == normalizedKid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
+                .Where(x => x.Kid == kid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
                 .OrderBy(x => x.Id)
                 .FirstOrDefaultAsync();
 
@@ -130,7 +127,7 @@ internal static class ConsentsEndpoints
         return new
         {
             id = request.Id,
-            kid = GuestHub.NormalizeKid(request.Kid),
+            kid = request.Kid,
             guestName = request.GuestName,
             identityNumber = request.IdentityNumber,
             checkInTime = request.CheckInTime,
@@ -144,25 +141,23 @@ internal static class ConsentsEndpoints
         };
     }
 
-    private static Task NotifyConsentChangedAsync(IHubContext<GuestHub> hub, string kid, int consentId, ConsentStatus status, string? pdfPath = null)
+    private static Task NotifyConsentChangedAsync(IHubContext<GuestHub> hub, int kid, int consentId, ConsentStatus status, string? pdfPath = null)
     {
-        var normalizedKid = GuestHub.NormalizeKid(kid);
-        return hub.Clients.Group(GuestHub.KioskGroup(normalizedKid)).SendAsync("consentChanged", new
+        return hub.Clients.Group(GuestHub.KioskGroup(kid)).SendAsync("consentChanged", new
         {
-            kid = normalizedKid,
+            kid,
             consentId,
             status = status.ToString(),
             pdfPath
         });
     }
 
-    private static async Task<IResult> CancelActiveConsentsForKidAsync(string kid, AppDb db, IHubContext<GuestHub> hub)
+    private static async Task<IResult> CancelActiveConsentsForKidAsync(int kid, AppDb db, IHubContext<GuestHub> hub)
     {
-        var normalizedKid = GuestHub.NormalizeKid(kid);
-        if (string.IsNullOrWhiteSpace(normalizedKid)) return Results.BadRequest(new { error = "kid is required" });
+        if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
         var requests = await db.ConsentRequests
-            .Where(x => x.Kid == normalizedKid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
+            .Where(x => x.Kid == kid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
             .OrderBy(x => x.Id)
             .ToListAsync();
 
