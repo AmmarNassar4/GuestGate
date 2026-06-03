@@ -14,7 +14,7 @@ BEGIN
     CREATE TABLE [dbo].[ConsentRequests]
     (
         [Id] int IDENTITY(1,1) NOT NULL CONSTRAINT [PK_ConsentRequests] PRIMARY KEY,
-        [Kid] nvarchar(50) NOT NULL,
+        [Kid] int NOT NULL,
         [GuestName] nvarchar(200) NOT NULL CONSTRAINT [DF_ConsentRequests_GuestName] DEFAULT N'',
         [IdentityNumber] nvarchar(80) NOT NULL CONSTRAINT [DF_ConsentRequests_IdentityNumber] DEFAULT N'',
         [CheckInTime] nvarchar(50) NOT NULL CONSTRAINT [DF_ConsentRequests_CheckInTime] DEFAULT N'',
