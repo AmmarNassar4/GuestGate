@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>GuestGate — Kiosk</title>
+    <style>
+        :root { --bg:#0b0f19; --panel:#121829; --ink:#e6eaf2; --muted:#b8c0d9; --stroke:#2b3551; --accent:#1a2140; --badge:#0b1220; }
+        * { box-sizing:border-box; }
+        body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+        button { cursor:pointer; }
+        #screensaver, #session, #consentApproval { position:fixed; inset:0; }
+        #screensaver { display:flex; flex-direction:column; }
+        .slides { position:relative; flex:1; overflow:hidden; background:#000; }
+        .slide { position:absolute; inset:0; background-position:center; background-size:cover; opacity:0; transition:opacity .8s ease; }
+        .slide.active { opacity:1; }
+        .statusBar { height:64px; display:flex; align-items:center; justify-content:center; gap:12px; border-top:1px solid rgba(255,255,255,.06); background:rgba(0,0,0,.35); }
+        .pill { border:1px solid var(--stroke); background:var(--accent); color:var(--ink); padding:10px 14px; border-radius:999px; }
+        #statusPanel { position:fixed; left:12px; bottom:84px; background:var(--panel); border:1px solid var(--stroke); border-radius:12px; padding:12px 14px; display:none; max-width:80vw; }
+        #statusPanel pre { margin:0; color:var(--muted); white-space:pre-wrap; }
+        #session, #consentApproval { display:none; padding:24px; overflow-y:auto; padding-bottom:80px; }
+        .card { max-width:880px; margin:0 auto; background:var(--panel); border-radius:16px; padding:22px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
+        .muted { color:var(--muted); }
+        label { display:block; margin:.6rem 0 .35rem; }
+        input, select, textarea { width:100%; padding:10px; border-radius:10px; border:1px solid var(--stroke); background:var(--badge); color:var(--ink); }
+        .readonly { opacity:.8; border-style:dashed; }
+        .rowActions { margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
+        .btn { padding:10px 16px; border-radius:10px; border:1px solid var(--stroke); background:var(--accent); color:var(--ink); }
+        .danger { border-color:#6b2b2b; background:#3a1818; }
+        .primary { background:#1f7a4c; border-color:#37a66c; }
+        .qrBadge { position:fixed; top:14px; right:14px; background:var(--panel); border:1px solid var(--stroke); border-radius:12px; padding:10px; width:200px; z-index:100; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+        .qrBox { width:180px; height:180px; background:var(--badge); border-radius:8px; margin:0 auto; }
+        .code { display:none !important; }
+        .guestName { font-size:22px; color:var(--muted); }
+        .consentTop { display:flex; gap:18px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+        .languagePicker { display:flex; align-items:center; gap:8px; min-width:220px; }
+        #consentTerms { margin-top:22px; white-space:pre-wrap; line-height:1.65; background:var(--badge); border:1px solid var(--stroke); border-radius:14px; padding:18px; max-height:36vh; overflow:auto; font-size:18px; }
+        .rtlText { direction:rtl; text-align:right; }
+        .agreeRow { display:flex; gap:12px; align-items:flex-start; margin:22px 0; font-size:18px; }
+        .agreeRow input { width:24px; height:24px; accent-color:#1f7a4c; }
+        #signatureCanvas { display:block; width:100%; height:220px; background:#fff; border-radius:14px; border:2px solid var(--stroke); touch-action:none; }
+        .message { min-height:24px; margin-top:14px; color:var(--muted); }
+        #done { position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#1f7a4c; color:#fff; padding:10px 14px; border-radius:999px; display:none; box-shadow:0 8px 24px rgba(0,0,0,.35); }
+        .phoneHint { display:block; color:var(--muted); font-size:12px; margin:-.15rem 0 .35rem; }
+        @media(max-width:900px){ .qrBadge{ width:150px; } .qrBox{ width:130px; height:130px; } }
+    </style>
+</head>
+<body>
+    <section id="screensaver" aria-label="Screensaver">
+        <div class="slides" id="slides"></div>
+        <div class="statusBar">
+            <button id="statusBtn" class="pill">Status</button>
+            <span id="clock" class="pill" aria-live="polite"></span>
+        </div>
+        <div id="statusPanel"><pre id="statusText"></pre></div>
+    </section>
+
+    <section id="session" aria-label="Active session">
+        <div class="qrBadge" id="qrBadge">
+            <div id="qr" class="qrBox"></div>
+            <small>Scan to fill on your phone</small>
+            <code id="shortLink" class="code"></code>
+            <div class="rowActions" style="margin-top:8px"><button id="cancelBtn" class="btn danger" title="Cancel this session">Cancel</button></div>
+        </div>
+        <div class="card">
+            <h2>Guest Form</h2>
+            <p class="muted">You can fill here on the tablet, or scan the QR in the corner to fill on your phone.</p>
+            <form id="inlineForm"></form>
+        </div>
+    </section>
+
+    <section id="consentApproval" aria-label="Consent approval">
+        <div class="card">
+            <div class="consentTop">
+                <div><h2 id="consentTitle">Terms and Conditions</h2><div class="guestName" id="consentGuestName"></div></div>
+                <label class="languagePicker">Language<select id="consentLanguage"><option value="en">English</option><option value="ar">العربية</option></select></label>
+            </div>
+            <div id="consentTerms"></div>
+            <label class="agreeRow"><input id="consentAccepted" type="checkbox" /> <span id="consentAcceptText">I have read and agree to the terms and conditions.</span></label>
+            <h2 id="signatureTitle">Signature</h2>
+            <canvas id="signatureCanvas" width="1200" height="360"></canvas>
+            <div class="rowActions"><button class="btn danger" id="clearSignatureBtn" type="button">Clear signature</button><button class="btn primary" id="submitConsentBtn" type="button">Submit signed consent</button></div>
+            <div class="message" id="consentMessage"></div>
+        </div>
+    </section>
+
+    <div id="done">Completed ✓ Returning to Ready…</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+    <script src="/lib/qrcode.min.js"></script>
+    <script src="/lib/guestgate-phone-input.js"></script>
+    <script>
+    (function () {
+        let SLIDES = ['/img/hotel/1.jpg','/img/hotel/2.jpg','/img/hotel/3.jpg'];
+        let SLIDE_MS = 8000;
+        let SCREENSAVER_ENABLED = true;
+        let pollTimer = null;
+        let pollInFlight = false;
+        let hub = null;
+        let sliderTimer = null;
+        let currentEt = null;
+        let currentSessionId = null;
+        let currentConsent = null;
+        let drawingSignature = false;
+        let hasSignature = false;
+
+        const screensaver = document.getElementById('screensaver');
+        const slidesEl = document.getElementById('slides');
+        const statusBtn = document.getElementById('statusBtn');
+        const statusPanel = document.getElementById('statusPanel');
+        const statusText = document.getElementById('statusText');
+        const clock = document.getElementById('clock');
+        const sessionSec = document.getElementById('session');
+        const inlineForm = document.getElementById('inlineForm');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const qrDiv = document.getElementById('qr');
+        const shortLink = document.getElementById('shortLink');
+        const doneRibbon = document.getElementById('done');
+        const consentApproval = document.getElementById('consentApproval');
+        const consentLanguage = document.getElementById('consentLanguage');
+        const consentTerms = document.getElementById('consentTerms');
+        const consentAccepted = document.getElementById('consentAccepted');
+        const consentGuestName = document.getElementById('consentGuestName');
+        const consentTitle = document.getElementById('consentTitle');
+        const consentAcceptText = document.getElementById('consentAcceptText');
+        const signatureTitle = document.getElementById('signatureTitle');
+        const clearSignatureBtn = document.getElementById('clearSignatureBtn');
+        const submitConsentBtn = document.getElementById('submitConsentBtn');
+        const consentMessage = document.getElementById('consentMessage');
+        const signatureCanvas = document.getElementById('signatureCanvas');
+        const signatureCtx = signatureCanvas.getContext('2d');
+
+        const qs = new URLSearchParams(location.search);
+        let kid = parseInt(qs.get('kid') || localStorage.getItem('kid') || '', 10);
+        if (!Number.isFinite(kid) || kid <= 0) {
+            const entered = prompt('Enter Tablet ID number (kid):');
+            kid = parseInt(entered || '', 10);
+            if (!Number.isFinite(kid) || kid <= 0) { alert('Tablet ID must be a number.'); return; }
+            localStorage.setItem('kid', String(kid));
+            location.search = '?kid=' + encodeURIComponent(String(kid));
+            return;
+        }
+        localStorage.setItem('kid', String(kid));
+
+        async function loadScreensaverConfig() {
+            try {
+                const r = await fetch('/api/kiosk/screensaver', { cache: 'no-store' });
+                if (!r.ok) return;
+                const cfg = await r.json();
+                SCREENSAVER_ENABLED = cfg.enabled !== false;
+                if (Array.isArray(cfg.images) && cfg.images.length) SLIDES = cfg.images;
+                if (Number.isFinite(Number(cfg.interval))) SLIDE_MS = Math.max(1000, Number(cfg.interval));
+            } catch { }
+        }
+        function runClock() { const fmt = new Intl.DateTimeFormat('en-GB', { dateStyle:'medium', timeStyle:'medium' }); const tick = () => clock.textContent = fmt.format(new Date()); tick(); setInterval(tick, 1000); }
+        async function requestWakeLock() { try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch { } }
+        function buildSlides() {
+            slidesEl.innerHTML = '';
+            const list = SCREENSAVER_ENABLED && SLIDES.length ? SLIDES : [];
+            if (!list.length) {
+                const fallback = document.createElement('div'); fallback.className = 'slide active'; fallback.style.background = 'linear-gradient(120deg,#0b0f19,#121829)'; slidesEl.appendChild(fallback); return;
+            }
+            list.forEach((url, i) => { const d = document.createElement('div'); d.className = 'slide' + (i === 0 ? ' active' : ''); d.style.backgroundImage = 'url("' + url + '")'; slidesEl.appendChild(d); });
+            let idx = 0; if (sliderTimer) clearInterval(sliderTimer);
+            sliderTimer = setInterval(() => { const all = slidesEl.querySelectorAll('.slide'); all.forEach(e => e.classList.remove('active')); idx = (idx + 1) % all.length; all[idx].classList.add('active'); }, SLIDE_MS);
+        }
+        function setStatus() { statusText.textContent = ['Tablet (kid): ' + kid, 'SignalR: ' + (hub ? hub.state : 'not-connected'), 'Active sessionId: ' + (currentSessionId ?? '—'), 'EditToken: ' + (currentEt ?? '—'), 'Consent requestId: ' + (currentConsent ? currentConsent.id : '—')].join('\n'); }
+        statusBtn.onclick = () => { setStatus(); statusPanel.style.display = statusPanel.style.display === 'block' ? 'none' : 'block'; };
+
+        function showReady() { currentEt = null; currentSessionId = null; currentConsent = null; sessionSec.style.display = 'none'; consentApproval.style.display = 'none'; doneRibbon.style.display = 'none'; screensaver.style.display = 'flex'; buildSlides(); setStatus(); }
+        function showCompletedThenReady() { doneRibbon.style.display = 'block'; setTimeout(showReady, 1400); }
+        function showSession(scanUrl, et, sessionId) { if (currentConsent) return; currentEt = et; currentSessionId = sessionId || currentSessionId; screensaver.style.display = 'none'; statusPanel.style.display = 'none'; consentApproval.style.display = 'none'; sessionSec.style.display = 'block'; doneRibbon.style.display = 'none'; renderInlineForm().catch(console.error); renderQr(scanUrl); shortLink.textContent = scanUrl; setStatus(); }
+        function renderQr(scanUrl) { qrDiv.innerHTML = ''; const size = Math.max(130, Math.floor(Math.min(qrDiv.getBoundingClientRect().width || 180, qrDiv.getBoundingClientRect().height || 180))); qrDiv.style.width = size + 'px'; qrDiv.style.height = size + 'px'; if (!window.QRCode) { setTimeout(() => renderQr(scanUrl), 100); return; } new QRCode(qrDiv, { text:String(scanUrl || ''), width:size, height:size, correctLevel:QRCode.CorrectLevel.M }); }
+        window.addEventListener('resize', () => { if (sessionSec.style.display === 'block' && currentEt && shortLink.textContent) renderQr(shortLink.textContent); });
+
+        async function getKioskState() { const r = await fetch(`/api/kiosk/state?kid=${encodeURIComponent(kid)}`, { cache:'no-store' }); if (!r.ok) throw new Error('state ' + r.status); return r.json(); }
+        function schedulePoll(ms) { if (pollTimer) clearTimeout(pollTimer); pollTimer = setTimeout(() => checkKioskState(false), Math.max(500, Number(ms) || 5000)); }
+        async function checkKioskState(force) {
+            if (pollInFlight) return;
+            pollInFlight = true;
+            let nextMs = 5000;
+            try {
+                const state = await getKioskState();
+                nextMs = state.nextPollMs || (state.hasWork ? 3000 : 5000);
+                if (state.consent && state.consent.id) {
+                    if (force || !currentConsent || Number(currentConsent.id) !== Number(state.consent.id)) showConsent(state.consent);
+                } else if (state.session && state.session.et) {
+                    if (!currentConsent && (force || !currentEt || String(currentEt).toLowerCase() !== String(state.session.et).toLowerCase())) showSession(state.session.scanUrl, state.session.et, state.session.sessionId);
+                } else if (currentEt || currentConsent) {
+                    showReady();
+                }
+            } catch (err) { console.warn('kiosk-state check failed', err); nextMs = 5000; }
+            finally { pollInFlight = false; schedulePoll(nextMs); }
+        }
+
+        function clearSignature() { signatureCtx.fillStyle = '#fff'; signatureCtx.fillRect(0,0,signatureCanvas.width,signatureCanvas.height); signatureCtx.strokeStyle = '#111'; signatureCtx.lineWidth = 5; signatureCtx.lineCap = 'round'; signatureCtx.lineJoin = 'round'; hasSignature = false; }
+        function signaturePoint(e) { const r = signatureCanvas.getBoundingClientRect(); const t = e.touches && e.touches[0] ? e.touches[0] : e; return { x:(t.clientX-r.left)*(signatureCanvas.width/r.width), y:(t.clientY-r.top)*(signatureCanvas.height/r.height) }; }
+        function startSignature(e) { e.preventDefault(); drawingSignature = true; hasSignature = true; const p = signaturePoint(e); signatureCtx.beginPath(); signatureCtx.moveTo(p.x,p.y); }
+        function moveSignature(e) { if (!drawingSignature) return; e.preventDefault(); const p = signaturePoint(e); signatureCtx.lineTo(p.x,p.y); signatureCtx.stroke(); }
+        function endSignature(e) { if (!drawingSignature) return; e.preventDefault(); drawingSignature = false; }
+        function renderConsentLanguage() { const ar = consentLanguage.value === 'ar'; consentTerms.classList.toggle('rtlText', ar); consentTitle.textContent = ar ? 'الشروط والأحكام' : 'Terms and Conditions'; signatureTitle.textContent = ar ? 'التوقيع' : 'Signature'; consentAcceptText.textContent = ar ? 'قرأت وأوافق على الشروط والأحكام.' : 'I have read and agree to the terms and conditions.'; if (currentConsent) { const guestName = currentConsent.guestName || ''; const identityNumber = currentConsent.identityNumber || ''; consentGuestName.textContent = ar ? `الضيف: ${guestName}${identityNumber ? ' - الهوية: ' + identityNumber : ''}` : `Guest: ${guestName}${identityNumber ? ' - ID: ' + identityNumber : ''}`; } else consentGuestName.textContent = ''; consentTerms.textContent = currentConsent ? (ar ? (currentConsent.termsAr || currentConsent.termsEn || '') : (currentConsent.termsEn || currentConsent.termsAr || '')) : ''; clearSignatureBtn.textContent = ar ? 'مسح التوقيع' : 'Clear signature'; submitConsentBtn.textContent = ar ? 'إرسال الموافقة الموقعة' : 'Submit signed consent'; }
+        function showConsent(data) { currentConsent = data; currentEt = null; currentSessionId = null; consentLanguage.value = String(data.language || 'en').toLowerCase() === 'ar' ? 'ar' : 'en'; screensaver.style.display = 'none'; statusPanel.style.display = 'none'; sessionSec.style.display = 'none'; consentApproval.style.display = 'block'; doneRibbon.style.display = 'none'; consentAccepted.checked = false; consentMessage.textContent = ''; clearSignature(); renderConsentLanguage(); setStatus(); }
+        consentLanguage.addEventListener('change', renderConsentLanguage); clearSignatureBtn.onclick = clearSignature; ['pointerdown','touchstart'].forEach(ev => signatureCanvas.addEventListener(ev, startSignature, { passive:false })); ['pointermove','touchmove'].forEach(ev => signatureCanvas.addEventListener(ev, moveSignature, { passive:false })); ['pointerup','pointerleave','touchend'].forEach(ev => signatureCanvas.addEventListener(ev, endSignature, { passive:false }));
+        function buildTightSignatureJpeg() { const src = signatureCanvas, ctx = signatureCtx, w = src.width, h = src.height, data = ctx.getImageData(0,0,w,h).data; let minX=w,minY=h,maxX=-1,maxY=-1; for(let y=0;y<h;y++){ for(let x=0;x<w;x++){ const i=(y*w+x)*4, r=data[i],g=data[i+1],b=data[i+2],a=data[i+3]; if(a>0&&(r<245||g<245||b<245)){ minX=Math.min(minX,x); minY=Math.min(minY,y); maxX=Math.max(maxX,x); maxY=Math.max(maxY,y); } } } if(maxX<minX||maxY<minY) return null; const pad=35; minX=Math.max(0,minX-pad); minY=Math.max(0,minY-pad); maxX=Math.min(w-1,maxX+pad); maxY=Math.min(h-1,maxY+pad); const cropW=maxX-minX+1,cropH=maxY-minY+1,out=document.createElement('canvas'); out.width=900; out.height=270; const octx=out.getContext('2d'); octx.fillStyle='#fff'; octx.fillRect(0,0,out.width,out.height); const margin=18, scale=Math.min((out.width-margin*2)/cropW,(out.height-margin*2)/cropH), drawW=cropW*scale, drawH=cropH*scale, drawX=(out.width-drawW)/2, drawY=(out.height-drawH)/2; octx.drawImage(src,minX,minY,cropW,cropH,drawX,drawY,drawW,drawH); return out.toDataURL('image/jpeg',0.92); }
+        submitConsentBtn.onclick = async () => { if (!currentConsent) return; const ar = consentLanguage.value === 'ar'; if (!consentAccepted.checked) { alert(ar ? 'يجب الموافقة على الشروط أولاً.' : 'Please accept the terms first.'); return; } const signatureImage = hasSignature ? buildTightSignatureJpeg() : null; if (!signatureImage) { alert(ar ? 'يرجى التوقيع أولاً.' : 'Please sign first.'); return; } submitConsentBtn.disabled = true; consentMessage.textContent = ar ? 'جارٍ الحفظ...' : 'Saving...'; try { const res = await fetch(`/api/consents/${currentConsent.id}/sign`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ accepted:true, language:consentLanguage.value, signatureImage }) }); if (res.ok) { consentMessage.textContent = ar ? 'تم الحفظ.' : 'Saved.'; setTimeout(showReady, 1000); } else { const err = await res.json().catch(() => ({})); alert(err.error || `Error ${res.status}`); } } finally { submitConsentBtn.disabled = false; } };
+
+        function fieldKey(field) { return String((field && (field.key || field.name || field.id)) || ''); }
+        function fieldLabel(field) { return String((field && (field.label || field.title || fieldKey(field))) || ''); }
+        function isPhoneField(field) { if (window.GuestGatePhone) return window.GuestGatePhone.isPhoneField(field); const dt = String((field && field.dataType) || '').toLowerCase(); const text = [fieldKey(field), fieldLabel(field), dt].join(' ').toLowerCase(); return ['phone','tel','telephone','mobile'].includes(dt) || ['mobile','phone','tel','جوال','موبايل','هاتف','تليفون','تلفون'].some(k => text.includes(k)); }
+        function isGuestVisible(field) { const g = field && field.guest; if (!g) return true; return !(g.hide === true || g.visible === false || String(g.visible).toLowerCase() === 'false'); }
+        function isLanguageField(field) { const k = String((field && (field.key || field.name || field.label || '')) || '').toLowerCase(); const dt = String((field && field.dataType) || '').toLowerCase(); return ['language','lang','اللغة'].some(s => k.includes(s)) || ['language','lang','languagecode'].includes(dt); }
+        const LanguageOptions = [{value:'en',text:'English'},{value:'ar',text:'العربية'},{value:'fr',text:'Français'},{value:'es',text:'Español'},{value:'de',text:'Deutsch'},{value:'zh',text:'中文'},{value:'ja',text:'日本語'},{value:'ru',text:'Русский'},{value:'pt',text:'Português'},{value:'it',text:'Italiano'},{value:'ko',text:'한국어'},{value:'hi',text:'हिन्दी'},{value:'tr',text:'Türkçe'},{value:'fa',text:'فارسی'},{value:'nl',text:'Nederlands'}];
+        async function renderInlineForm() { inlineForm.innerHTML = ''; let r = await fetch(`/tablet/${encodeURIComponent(kid)}/form-config`, { cache:'no-store' }); if (!r.ok) { await new Promise(resolve => setTimeout(resolve,250)); r = await fetch(`/tablet/${encodeURIComponent(kid)}/form-config`, { cache:'no-store' }); } if (!r.ok) { console.warn('form-config not available'); return; } const cfg = await r.json(), template = cfg.template || {}, prefill = cfg.prefill || {}; const fields = (template.fields || []).filter(isGuestVisible).filter(f => !f.scope || f.scope === 'StartForm').sort((a,b)=>(a.order||0)-(b.order||0)); function buildInput(f) { const dt = (f.dataType || 'Text').toLowerCase(); let input; if (dt === 'enum') { input = document.createElement('select'); const opts = Array.isArray(f.options) ? f.options : []; for (const o of opts) { let val, text; if (typeof o === 'string') { val=o; text=o; } else { val=o.value ?? o.key ?? o.id ?? o.text; text=o.label ?? o.text ?? val; } const opt = document.createElement('option'); opt.value = val ?? ''; opt.textContent = text ?? ''; input.appendChild(opt); } } else if (dt === 'textarea' || dt === 'multiline' || dt === 'notes') { input = document.createElement('textarea'); input.rows = 4; } else { input = document.createElement('input'); input.type = ({ text:'text', number:'number', date:'date', email:'email', phone:'tel', tel:'tel', mobile:'tel', idnumber:'text' }[dt]) || 'text'; if (input.type === 'tel') input.inputMode = 'tel'; if (input.type === 'email') input.inputMode = 'email'; if (f.validation) { if (f.validation.minLength) input.minLength = f.validation.minLength; if (f.validation.maxLength) input.maxLength = f.validation.maxLength; if (f.validation.regex) input.pattern = f.validation.regex; } } return input; }
+            for (const f of fields) { const key = fieldKey(f), labelText = fieldLabel(f), editable = !f.guest || f.guest.editable !== false, required = !!(f.guest && f.guest.required), v = (prefill[key] !== undefined && prefill[key] !== null) ? prefill[key] : (f.defaultValue ?? ''); const label = document.createElement('label'); label.textContent = labelText || key; if (required) label.textContent += ' *'; let input; if (isPhoneField(f) && window.GuestGatePhone) { input = window.GuestGatePhone.createInput(f, v, { key, required, readOnly:!editable, className:'', placeholder:f.placeholder || 'Mobile number' }); } else if (isLanguageField(f)) { input = document.createElement('select'); input.name = key; input.dataset.field = key; const emptyOpt = document.createElement('option'); emptyOpt.value=''; emptyOpt.textContent='Select…'; input.appendChild(emptyOpt); for (const lo of LanguageOptions) { const opt = document.createElement('option'); opt.value = lo.value; opt.textContent = lo.text; input.appendChild(opt); } if (!editable) { input.disabled = true; input.classList.add('readonly'); } if (required) input.required = true; input.value = String(v ?? ''); } else { input = buildInput(f); input.name = key; input.dataset.field = key; if (!editable) { if (input.tagName === 'SELECT') input.disabled = true; else input.readOnly = true; input.classList.add('readonly'); } if (required) input.required = true; if (v !== undefined && v !== null) input.value = v; } inlineForm.appendChild(label); inlineForm.appendChild(input); if (input.dataset.guestgatePhone === '1') { const hint = document.createElement('small'); hint.className = 'phoneHint'; hint.textContent = 'Select the country or enter the number; it will be saved in international format.'; inlineForm.appendChild(hint); } }
+            const actions = document.createElement('div'); actions.className = 'rowActions'; const submit = document.createElement('button'); submit.id = 'submitBtn'; submit.className = 'btn'; submit.type = 'submit'; submit.textContent = 'Submit'; actions.appendChild(submit); inlineForm.appendChild(actions);
+        }
+        inlineForm.addEventListener('submit', async (e) => { e.preventDefault(); if (!currentEt) { alert('No active session.'); return; } if (window.GuestGatePhone && !(await window.GuestGatePhone.validateForm(inlineForm))) return; const data = {}; inlineForm.querySelectorAll('[data-field]').forEach(el => { let v; if (window.GuestGatePhone && el.dataset.guestgatePhone === '1') v = window.GuestGatePhone.getValue(el); else { v = (el.value ?? '').toString().trim(); if (el.type === 'date' && v === '') v = null; } data[el.dataset.field] = v; }); const res = await fetch('/api/mobile/save', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ et: currentEt, data }) }); if (res.ok) showCompletedThenReady(); else if (res.status === 410) { alert('Session expired.'); showReady(); } else { let err=''; try { err = (await res.json()).error || ''; } catch { } alert('Error: ' + (err || res.status)); } });
+        cancelBtn.onclick = async () => { await fetch(`/api/sessions/active?kid=${encodeURIComponent(kid)}`, { method:'DELETE' }); showReady(); checkKioskState(true); };
+
+        if (window.signalR) { hub = new signalR.HubConnectionBuilder().withUrl(`/hubs/guest?kid=${encodeURIComponent(kid)}`).withAutomaticReconnect().build(); hub.on('sessionStarted', p => { if (p && p.scanUrl && p.et) showSession(p.scanUrl, p.et, p.sessionId); else checkKioskState(true); }); hub.on('sessionEnded', () => { showReady(); checkKioskState(true); }); hub.on('sessionCompleted', () => showCompletedThenReady()); hub.on('consentChanged', p => { const status = String((p && p.status) || '').toLowerCase(); if (status === 'signed' || status === 'cancelled') showReady(); else checkKioskState(true); }); hub.onreconnected(() => checkKioskState(true)); hub.onclose(() => setTimeout(() => checkKioskState(true), 500)); hub.start().then(() => checkKioskState(true)).catch(() => setTimeout(() => checkKioskState(true), 500)); }
+        (async function init(){ runClock(); requestWakeLock(); await loadScreensaverConfig(); buildSlides(); showReady(); checkKioskState(true); })();
+    })();
+    </script>
+</body>
+</html>
