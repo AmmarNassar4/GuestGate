@@ -10,18 +10,27 @@ namespace GuestGate.Api.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IHubContext<GuestHub> _hub;
         private readonly ILogger<ConsentWatcher> _logger;
+        private readonly TimeSpan _pollInterval;
         private DateTime _lastSeenUtc = DateTime.MinValue;
         private bool _firstPoll = true;
 
-        public ConsentWatcher(IServiceScopeFactory scopeFactory, IHubContext<GuestHub> hub, ILogger<ConsentWatcher> logger)
+        public ConsentWatcher(
+            IServiceScopeFactory scopeFactory,
+            IHubContext<GuestHub> hub,
+            ILogger<ConsentWatcher> logger,
+            IConfiguration configuration)
         {
             _scopeFactory = scopeFactory;
             _hub = hub;
             _logger = logger;
+            var seconds = configuration.GetValue<int?>("ConsentWatcher:PollSeconds") ?? 15;
+            _pollInterval = TimeSpan.FromSeconds(Math.Clamp(seconds, 5, 300));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            _logger.LogInformation("ConsentWatcher fallback started. PollInterval: {PollInterval}", _pollInterval);
+
             try
             {
                 while (!stoppingToken.IsCancellationRequested)
@@ -33,7 +42,7 @@ namespace GuestGate.Api.Services
                         var changed = await db.ConsentRequests.AsNoTracking()
                             .Where(x => x.UpdatedAt > _lastSeenUtc)
                             .OrderBy(x => x.UpdatedAt)
-                            .Select(x => new { x.Id, x.Kid, x.Status, x.UpdatedAt })
+                            .Select(x => new { x.Id, x.Kid, x.Status, x.PdfPath, x.UpdatedAt })
                             .ToListAsync(stoppingToken);
 
                         if (_firstPoll && changed.Count == 0)
@@ -48,7 +57,8 @@ namespace GuestGate.Api.Services
                             {
                                 kid = item.Kid,
                                 consentId = item.Id,
-                                status = item.Status.ToString()
+                                status = item.Status.ToString(),
+                                pdfPath = item.PdfPath
                             }, stoppingToken);
                             if (item.UpdatedAt > _lastSeenUtc) _lastSeenUtc = item.UpdatedAt;
                         }
@@ -57,15 +67,15 @@ namespace GuestGate.Api.Services
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        _logger.LogWarning(ex, "ConsentWatcher polling failed.");
+                        _logger.LogWarning(ex, "ConsentWatcher fallback polling failed.");
                     }
 
-                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                    await Task.Delay(_pollInterval, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("ConsentWatcher cancellation requested.");
+                _logger.LogInformation("ConsentWatcher fallback cancellation requested.");
             }
         }
     }
