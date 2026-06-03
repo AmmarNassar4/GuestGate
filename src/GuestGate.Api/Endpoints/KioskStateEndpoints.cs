@@ -13,27 +13,37 @@ internal static class KioskStateEndpoints
         {
             if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
-            var consent = await db.ConsentRequests
+            var options = opt.Value;
+            var idlePollMs = Math.Clamp(options.IdlePollMs, 2000, 60000);
+            var activePollMs = Math.Clamp(options.ActivePollMs, 1000, 30000);
+            var consentPollMs = Math.Clamp(options.ConsentPollMs, 500, 10000);
+
+            var consentCandidate = await db.ConsentRequests
                 .Where(x => x.Kid == kid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
                 .OrderBy(x => x.Id)
+                .Select(x => new { x.Id, x.Status })
                 .FirstOrDefaultAsync();
 
-            if (consent is not null)
+            if (consentCandidate is not null)
             {
-                if (consent.Status == ConsentStatus.Waiting)
+                var consent = await db.ConsentRequests.FirstOrDefaultAsync(x => x.Id == consentCandidate.Id);
+                if (consent is not null)
                 {
-                    consent.Status = ConsentStatus.Assigned;
-                    consent.UpdatedAt = DateTime.UtcNow;
-                    await db.SaveChangesAsync();
-                }
+                    if (consent.Status == ConsentStatus.Waiting)
+                    {
+                        consent.Status = ConsentStatus.Assigned;
+                        consent.UpdatedAt = DateTime.UtcNow;
+                        await db.SaveChangesAsync();
+                    }
 
-                return Results.Ok(new
-                {
-                    hasWork = true,
-                    nextPollMs = 1000,
-                    consent = ToConsentDto(consent),
-                    session = (object?)null
-                });
+                    return Results.Ok(new
+                    {
+                        hasWork = true,
+                        nextPollMs = consentPollMs,
+                        consent = ToConsentDto(consent),
+                        session = (object?)null
+                    });
+                }
             }
 
             var now = DateTime.UtcNow;
@@ -56,7 +66,7 @@ internal static class KioskStateEndpoints
                 return Results.Ok(new
                 {
                     hasWork = false,
-                    nextPollMs = 5000,
+                    nextPollMs = idlePollMs,
                     consent = (object?)null,
                     session = (object?)null
                 });
@@ -72,17 +82,17 @@ internal static class KioskStateEndpoints
                 return Results.Ok(new
                 {
                     hasWork = false,
-                    nextPollMs = 5000,
+                    nextPollMs = idlePollMs,
                     consent = (object?)null,
                     session = (object?)null
                 });
             }
 
-            var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, session.EditToken, session.Kid);
+            var scanUrl = BuildScanUrl(options.MobileBaseUrl, session.EditToken, session.Kid);
             return Results.Ok(new
             {
                 hasWork = true,
-                nextPollMs = 3000,
+                nextPollMs = activePollMs,
                 consent = (object?)null,
                 session = new
                 {
