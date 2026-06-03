@@ -10,7 +10,7 @@ namespace GuestGate.Desktop
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new ConsentRequestForm("http://localhost:5264", () => "K1"));
+            Application.Run(new ConsentRequestForm("http://localhost:5264", () => "1"));
         }
     }
 }
