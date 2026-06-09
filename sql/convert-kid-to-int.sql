@@ -1,6 +1,6 @@
 -- Converts KioskSessions.Kid and ConsentRequests.Kid from text values to int values.
--- Run once before deploying the API version that maps Kid as int.
--- This script supports old values like 'K1' and numeric text like '1'.
+-- Run once before deploying or immediately after deploying the API version that maps Kid as int.
+-- Supports values like '1', '01', 'K1', 'k1', 'KIOSK-01', and 'kiosk-01'.
 
 BEGIN TRANSACTION;
 
@@ -18,10 +18,31 @@ BEGIN
         IF EXISTS (
             SELECT 1
             FROM dbo.KioskSessions
-            WHERE TRY_CONVERT(int, CASE WHEN LEFT(LTRIM(RTRIM(Kid)), 1) IN (N'K', N'k') THEN SUBSTRING(LTRIM(RTRIM(Kid)), 2, 50) ELSE LTRIM(RTRIM(Kid)) END) IS NULL
+            CROSS APPLY (SELECT LTRIM(RTRIM(CONVERT(nvarchar(80), Kid))) AS RawKid) r
+            CROSS APPLY (SELECT CASE
+                WHEN TRY_CONVERT(int, r.RawKid) IS NOT NULL THEN r.RawKid
+                WHEN UPPER(r.RawKid) LIKE N'KIOSK-%' THEN SUBSTRING(r.RawKid, CHARINDEX(N'-', r.RawKid) + 1, 80)
+                WHEN UPPER(r.RawKid) LIKE N'KIOSK%' THEN SUBSTRING(r.RawKid, 6, 80)
+                WHEN LEFT(r.RawKid, 1) IN (N'K', N'k') THEN SUBSTRING(r.RawKid, 2, 80)
+                ELSE r.RawKid
+            END AS NormalizedKid) n
+            WHERE TRY_CONVERT(int, n.NormalizedKid) IS NULL
+               OR TRY_CONVERT(int, n.NormalizedKid) <= 0
         )
         BEGIN
-            THROW 50001, 'KioskSessions contains Kid values that cannot be converted to int.', 1;
+            SELECT DISTINCT Kid AS InvalidKid FROM dbo.KioskSessions
+            CROSS APPLY (SELECT LTRIM(RTRIM(CONVERT(nvarchar(80), Kid))) AS RawKid) r
+            CROSS APPLY (SELECT CASE
+                WHEN TRY_CONVERT(int, r.RawKid) IS NOT NULL THEN r.RawKid
+                WHEN UPPER(r.RawKid) LIKE N'KIOSK-%' THEN SUBSTRING(r.RawKid, CHARINDEX(N'-', r.RawKid) + 1, 80)
+                WHEN UPPER(r.RawKid) LIKE N'KIOSK%' THEN SUBSTRING(r.RawKid, 6, 80)
+                WHEN LEFT(r.RawKid, 1) IN (N'K', N'k') THEN SUBSTRING(r.RawKid, 2, 80)
+                ELSE r.RawKid
+            END AS NormalizedKid) n
+            WHERE TRY_CONVERT(int, n.NormalizedKid) IS NULL
+               OR TRY_CONVERT(int, n.NormalizedKid) <= 0;
+
+            THROW 50001, 'KioskSessions contains Kid values that cannot be converted to a positive int.', 1;
         END;
 
         IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.KioskSessions') AND name = N'IX_KioskSessions_Kid_Status')
@@ -29,8 +50,17 @@ BEGIN
 
         ALTER TABLE dbo.KioskSessions ADD KidInt int NULL;
 
-        UPDATE dbo.KioskSessions
-           SET KidInt = TRY_CONVERT(int, CASE WHEN LEFT(LTRIM(RTRIM(Kid)), 1) IN (N'K', N'k') THEN SUBSTRING(LTRIM(RTRIM(Kid)), 2, 50) ELSE LTRIM(RTRIM(Kid)) END);
+        UPDATE s
+           SET KidInt = TRY_CONVERT(int, n.NormalizedKid)
+        FROM dbo.KioskSessions s
+        CROSS APPLY (SELECT LTRIM(RTRIM(CONVERT(nvarchar(80), s.Kid))) AS RawKid) r
+        CROSS APPLY (SELECT CASE
+            WHEN TRY_CONVERT(int, r.RawKid) IS NOT NULL THEN r.RawKid
+            WHEN UPPER(r.RawKid) LIKE N'KIOSK-%' THEN SUBSTRING(r.RawKid, CHARINDEX(N'-', r.RawKid) + 1, 80)
+            WHEN UPPER(r.RawKid) LIKE N'KIOSK%' THEN SUBSTRING(r.RawKid, 6, 80)
+            WHEN LEFT(r.RawKid, 1) IN (N'K', N'k') THEN SUBSTRING(r.RawKid, 2, 80)
+            ELSE r.RawKid
+        END AS NormalizedKid) n;
 
         ALTER TABLE dbo.KioskSessions DROP COLUMN Kid;
         EXEC sp_rename 'dbo.KioskSessions.KidInt', 'Kid', 'COLUMN';
@@ -53,10 +83,31 @@ BEGIN
         IF EXISTS (
             SELECT 1
             FROM dbo.ConsentRequests
-            WHERE TRY_CONVERT(int, CASE WHEN LEFT(LTRIM(RTRIM(Kid)), 1) IN (N'K', N'k') THEN SUBSTRING(LTRIM(RTRIM(Kid)), 2, 50) ELSE LTRIM(RTRIM(Kid)) END) IS NULL
+            CROSS APPLY (SELECT LTRIM(RTRIM(CONVERT(nvarchar(80), Kid))) AS RawKid) r
+            CROSS APPLY (SELECT CASE
+                WHEN TRY_CONVERT(int, r.RawKid) IS NOT NULL THEN r.RawKid
+                WHEN UPPER(r.RawKid) LIKE N'KIOSK-%' THEN SUBSTRING(r.RawKid, CHARINDEX(N'-', r.RawKid) + 1, 80)
+                WHEN UPPER(r.RawKid) LIKE N'KIOSK%' THEN SUBSTRING(r.RawKid, 6, 80)
+                WHEN LEFT(r.RawKid, 1) IN (N'K', N'k') THEN SUBSTRING(r.RawKid, 2, 80)
+                ELSE r.RawKid
+            END AS NormalizedKid) n
+            WHERE TRY_CONVERT(int, n.NormalizedKid) IS NULL
+               OR TRY_CONVERT(int, n.NormalizedKid) <= 0
         )
         BEGIN
-            THROW 50002, 'ConsentRequests contains Kid values that cannot be converted to int.', 1;
+            SELECT DISTINCT Kid AS InvalidKid FROM dbo.ConsentRequests
+            CROSS APPLY (SELECT LTRIM(RTRIM(CONVERT(nvarchar(80), Kid))) AS RawKid) r
+            CROSS APPLY (SELECT CASE
+                WHEN TRY_CONVERT(int, r.RawKid) IS NOT NULL THEN r.RawKid
+                WHEN UPPER(r.RawKid) LIKE N'KIOSK-%' THEN SUBSTRING(r.RawKid, CHARINDEX(N'-', r.RawKid) + 1, 80)
+                WHEN UPPER(r.RawKid) LIKE N'KIOSK%' THEN SUBSTRING(r.RawKid, 6, 80)
+                WHEN LEFT(r.RawKid, 1) IN (N'K', N'k') THEN SUBSTRING(r.RawKid, 2, 80)
+                ELSE r.RawKid
+            END AS NormalizedKid) n
+            WHERE TRY_CONVERT(int, n.NormalizedKid) IS NULL
+               OR TRY_CONVERT(int, n.NormalizedKid) <= 0;
+
+            THROW 50002, 'ConsentRequests contains Kid values that cannot be converted to a positive int.', 1;
         END;
 
         IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.ConsentRequests') AND name = N'IX_ConsentRequests_Kid_Status')
@@ -64,8 +115,17 @@ BEGIN
 
         ALTER TABLE dbo.ConsentRequests ADD KidInt int NULL;
 
-        UPDATE dbo.ConsentRequests
-           SET KidInt = TRY_CONVERT(int, CASE WHEN LEFT(LTRIM(RTRIM(Kid)), 1) IN (N'K', N'k') THEN SUBSTRING(LTRIM(RTRIM(Kid)), 2, 50) ELSE LTRIM(RTRIM(Kid)) END);
+        UPDATE c
+           SET KidInt = TRY_CONVERT(int, n.NormalizedKid)
+        FROM dbo.ConsentRequests c
+        CROSS APPLY (SELECT LTRIM(RTRIM(CONVERT(nvarchar(80), c.Kid))) AS RawKid) r
+        CROSS APPLY (SELECT CASE
+            WHEN TRY_CONVERT(int, r.RawKid) IS NOT NULL THEN r.RawKid
+            WHEN UPPER(r.RawKid) LIKE N'KIOSK-%' THEN SUBSTRING(r.RawKid, CHARINDEX(N'-', r.RawKid) + 1, 80)
+            WHEN UPPER(r.RawKid) LIKE N'KIOSK%' THEN SUBSTRING(r.RawKid, 6, 80)
+            WHEN LEFT(r.RawKid, 1) IN (N'K', N'k') THEN SUBSTRING(r.RawKid, 2, 80)
+            ELSE r.RawKid
+        END AS NormalizedKid) n;
 
         ALTER TABLE dbo.ConsentRequests DROP COLUMN Kid;
         EXEC sp_rename 'dbo.ConsentRequests.KidInt', 'Kid', 'COLUMN';
