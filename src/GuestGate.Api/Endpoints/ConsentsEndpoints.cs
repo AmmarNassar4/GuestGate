@@ -4,6 +4,7 @@ using GuestGate.Api.Models;
 using GuestGate.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace GuestGate.Api.Endpoints;
 
@@ -16,7 +17,7 @@ internal static class ConsentsEndpoints
         api.MapPost("/consents", async Task<IResult> (ConsentCreateDto body, AppDb db, IWebHostEnvironment env, IHubContext<GuestHub> hub, CancellationToken ct) =>
         {
             if (body is null) return Results.BadRequest(new { error = "Invalid payload" });
-            if (body.kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
+            if (!TryParseKid(body.kid, out var kid)) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             var checkInTime = (body.checkInTime ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(checkInTime)) return Results.BadRequest(new { error = "checkInTime is required" });
@@ -25,7 +26,7 @@ internal static class ConsentsEndpoints
             var now = DateTime.UtcNow;
             var request = new ConsentRequest
             {
-                Kid = body.kid,
+                Kid = kid,
                 GuestName = (body.guestName ?? string.Empty).Trim(),
                 IdentityNumber = (body.identityNumber ?? string.Empty).Trim(),
                 CheckInTime = checkInTime,
@@ -74,12 +75,12 @@ internal static class ConsentsEndpoints
             });
         });
 
-        api.MapGet("/consents/active", async Task<IResult> (int kid, AppDb db) =>
+        api.MapGet("/consents/active", async Task<IResult> (string kid, AppDb db) =>
         {
-            if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
+            if (!TryParseKid(kid, out var parsedKid)) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             var request = await db.ConsentRequests
-                .Where(x => x.Kid == kid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
+                .Where(x => x.Kid == parsedKid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
                 .OrderBy(x => x.Id)
                 .FirstOrDefaultAsync();
 
@@ -127,7 +128,7 @@ internal static class ConsentsEndpoints
         return new
         {
             id = request.Id,
-            kid = request.Kid,
+            kid = request.Kid.ToString(),
             guestName = request.GuestName,
             identityNumber = request.IdentityNumber,
             checkInTime = request.CheckInTime,
@@ -145,19 +146,19 @@ internal static class ConsentsEndpoints
     {
         return hub.Clients.Group(GuestHub.KioskGroup(kid)).SendAsync("consentChanged", new
         {
-            kid,
+            kid = kid.ToString(),
             consentId,
             status = status.ToString(),
             pdfPath
         });
     }
 
-    private static async Task<IResult> CancelActiveConsentsForKidAsync(int kid, AppDb db, IHubContext<GuestHub> hub)
+    private static async Task<IResult> CancelActiveConsentsForKidAsync(string kid, AppDb db, IHubContext<GuestHub> hub)
     {
-        if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
+        if (!TryParseKid(kid, out var parsedKid)) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
         var requests = await db.ConsentRequests
-            .Where(x => x.Kid == kid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
+            .Where(x => x.Kid == parsedKid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
             .OrderBy(x => x.Id)
             .ToListAsync();
 
@@ -178,5 +179,48 @@ internal static class ConsentsEndpoints
         }
 
         return Results.Ok(new { ok = true, cancelledCount = requests.Count });
+    }
+
+    private static bool TryParseKid(JsonElement value, out int kid)
+    {
+        kid = 0;
+
+        if (value.ValueKind == JsonValueKind.Number)
+        {
+            return value.TryGetInt32(out kid) && kid > 0;
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            return TryParseKid(value.GetString(), out kid);
+        }
+
+        return false;
+    }
+
+    private static bool TryParseKid(string? value, out int kid)
+    {
+        kid = 0;
+        var text = (value ?? string.Empty).Trim();
+        if (text.Length == 0) return false;
+
+        if (int.TryParse(text, out kid) && kid > 0) return true;
+
+        if (text.StartsWith("KIOSK-", StringComparison.OrdinalIgnoreCase))
+        {
+            return int.TryParse(text[6..], out kid) && kid > 0;
+        }
+
+        if (text.StartsWith("KIOSK", StringComparison.OrdinalIgnoreCase))
+        {
+            return int.TryParse(text[5..], out kid) && kid > 0;
+        }
+
+        if (text.StartsWith("K", StringComparison.OrdinalIgnoreCase))
+        {
+            return int.TryParse(text[1..], out kid) && kid > 0;
+        }
+
+        return false;
     }
 }
