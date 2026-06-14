@@ -17,6 +17,7 @@ namespace GuestGate.Desktop
         public string ApiBasePath { get; private set; } = "/api";
         public List<string> Kids { get; private set; } = new List<string> { "1", "2", "3" };
         public string PreferredKid { get; private set; } = "1";
+        public string PreferredTemplateName { get; private set; } = string.Empty;
         public string ConfigFilePath { get; private set; } = string.Empty;
 
         public static DesktopConfiguration Load()
@@ -61,6 +62,15 @@ namespace GuestGate.Desktop
                 string preferredKid = ReadSetting(appSettings, "PreferredKid");
                 if (!string.IsNullOrWhiteSpace(preferredKid))
                     settings.PreferredKid = NormalizeKid(preferredKid);
+
+                string preferredTemplateName = ReadSetting(appSettings, "PreferredTemplateName");
+                if (string.IsNullOrWhiteSpace(preferredTemplateName))
+                    preferredTemplateName = ReadSetting(appSettings, "PreferredTemplate");
+                if (string.IsNullOrWhiteSpace(preferredTemplateName))
+                    preferredTemplateName = ReadSetting(appSettings, "PreferredTemplateId");
+
+                if (!string.IsNullOrWhiteSpace(preferredTemplateName))
+                    settings.PreferredTemplateName = preferredTemplateName.Trim();
             }
             catch
             {
@@ -107,6 +117,7 @@ namespace GuestGate.Desktop
                 kidBox.SelectedIndex = 0;
 
             SetPrivateField(form, "_currentKid", kidBox.SelectedItem?.ToString() ?? orderedKids[0]);
+            SetupPreferredTemplateSelector(form, settings.PreferredTemplateName);
         }
 
         public static string NormalizeKid(string value)
@@ -120,6 +131,104 @@ namespace GuestGate.Desktop
             }
 
             return text;
+        }
+
+        private static void SetupPreferredTemplateSelector(ReceptionForm form, string preferredTemplateName)
+        {
+            preferredTemplateName = (preferredTemplateName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(preferredTemplateName))
+                return;
+
+            var templateBox = GetPrivateField<ComboBox>(form, "_templateBox");
+            if (templateBox == null)
+                return;
+
+            if (TrySelectTemplate(templateBox, preferredTemplateName))
+                return;
+
+            var timer = new Timer { Interval = 250 };
+            int remainingAttempts = 80;
+
+            timer.Tick += delegate
+            {
+                remainingAttempts--;
+                bool selected = TrySelectTemplate(templateBox, preferredTemplateName);
+                if (selected || remainingAttempts <= 0)
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                }
+            };
+
+            timer.Start();
+        }
+
+        private static bool TrySelectTemplate(ComboBox templateBox, string preferredTemplateName)
+        {
+            if (templateBox == null || string.IsNullOrWhiteSpace(preferredTemplateName))
+                return false;
+
+            for (int index = 0; index < templateBox.Items.Count; index++)
+            {
+                object item = templateBox.Items[index];
+                if (TemplateMatches(item, preferredTemplateName))
+                {
+                    if (templateBox.SelectedIndex != index)
+                        templateBox.SelectedIndex = index;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TemplateMatches(object item, string preferredTemplateName)
+        {
+            if (item == null)
+                return false;
+
+            string preferred = NormalizeComparableText(preferredTemplateName);
+            if (string.IsNullOrWhiteSpace(preferred))
+                return false;
+
+            foreach (string memberName in new[] { "Id", "Name", "Text" })
+            {
+                string value = GetPublicOrPrivateMemberValue(item, memberName);
+                if (TextsMatch(value, preferred))
+                    return true;
+            }
+
+            return TextsMatch(item.ToString(), preferred);
+        }
+
+        private static bool TextsMatch(string value, string preferred)
+        {
+            string normalizedValue = NormalizeComparableText(value);
+            return string.Equals(normalizedValue, preferred, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeComparableText(string value)
+        {
+            return (value ?? string.Empty).Trim();
+        }
+
+        private static string GetPublicOrPrivateMemberValue(object target, string memberName)
+        {
+            if (target == null)
+                return string.Empty;
+
+            Type type = target.GetType();
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+            var field = type.GetField(memberName, flags);
+            if (field != null)
+                return field.GetValue(target)?.ToString() ?? string.Empty;
+
+            var property = type.GetProperty(memberName, flags);
+            if (property != null)
+                return property.GetValue(target, null)?.ToString() ?? string.Empty;
+
+            return string.Empty;
         }
 
         private static string ReadSetting(XElement appSettings, string name)
