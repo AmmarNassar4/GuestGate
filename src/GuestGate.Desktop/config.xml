@@ -9,5 +9,7 @@
     <Kids>K1,K2,K3</Kids>
     <!-- Preferred tablet (will be updated from the app) -->
     <PreferredKid>K3</PreferredKid>
+    <!-- Preferred template name or template ID -->
+    <PreferredTemplateName></PreferredTemplateName>
   </appSettings>
 </configuration>
