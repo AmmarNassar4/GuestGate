@@ -13,6 +13,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="GuestGate.ico" />
+    <None Include="config.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\..\..\Desktop\GuestGate.png">
