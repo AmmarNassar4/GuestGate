@@ -21,7 +21,7 @@ namespace GuestGate.Desktop
         private HubConnection _hub;
 
         private string _baseUrl = DefaultBaseUrl;
-        private string _currentKid = "K1";
+        private string _currentKid = "3";
         private string _selectedTemplateId = "";
         private JObject _selectedTemplateDef = new JObject();
         private int _activeSessionId = 0;
@@ -37,11 +37,11 @@ namespace GuestGate.Desktop
         public ReceptionForm()
         {
             InitializeComponent(); // ← عناصر الواجهة من الـ Designer
-            BuildConsentLauncherButton();
+            //BuildConsentLauncherButton();
 
             // قيم افتراضية
             if (_kidBox.Items.Count == 0)
-                _kidBox.Items.AddRange(new object[] { "K1", "K2", "K3" });
+                _kidBox.Items.AddRange(new object[] { "1", "2", "3" });
             _kidBox.SelectedIndex = 0;
 
             // ربط الأحداث (لا تضعها في Designer لتبقى القراءة واضحة)
@@ -49,7 +49,7 @@ namespace GuestGate.Desktop
             _templateBox.SelectedIndexChanged += async (_, __) => await LoadTemplateAndRenderReceptionForm();
             _startBtn.Click += async (_, __) => await StartSessionAsync();
             _endBtn.Click += async (_, __) => await EndSessionAsync();
-            _consentBtn.Click += (_, __) => OpenConsentRequestForm();
+            //_consentBtn.Click += (_, __) => OpenConsentRequestForm();
             _retryTimer.Tick += async (_, __) =>
             {
                 if (_hub == null || _hub.State == HubConnectionState.Disconnected)
@@ -78,22 +78,22 @@ namespace GuestGate.Desktop
         // =========================================================
         // Consent approval launcher
         // =========================================================
-        private void BuildConsentLauncherButton()
-        {
-            _consentBtn = new Button();
-            _consentBtn.Location = new Point(347, 10);
-            _consentBtn.Name = "_consentBtn";
-            _consentBtn.Size = new Size(120, 55);
-            _consentBtn.Text = "Consent form";
-            _consentBtn.UseVisualStyleBackColor = true;
-            _top.Controls.Add(_consentBtn);
+        //private void BuildConsentLauncherButton()
+        //{
+        //    _consentBtn = new Button();
+        //    _consentBtn.Location = new Point(347, 10);
+        //    _consentBtn.Name = "_consentBtn";
+        //    _consentBtn.Size = new Size(120, 55);
+        //    _consentBtn.Text = "Consent form";
+        //    _consentBtn.UseVisualStyleBackColor = true;
+        //    _top.Controls.Add(_consentBtn);
 
-            if (_top.Width < 490)
-            {
-                _top.Width = 490;
-                this.Width = Math.Max(this.Width, 510);
-            }
-        }
+        //    if (_top.Width < 490)
+        //    {
+        //        _top.Width = 490;
+        //        this.Width = Math.Max(this.Width, 510);
+        //    }
+        //}
 
         private void OpenConsentRequestForm()
         {
