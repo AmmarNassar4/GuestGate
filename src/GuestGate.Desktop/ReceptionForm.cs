@@ -61,7 +61,7 @@ namespace GuestGate.Desktop
             UpdateStartEnabled();
 
             // Bootstrap عند إظهار النافذة
-            this.Height = Math.Max(this.Height, 720);
+            this.Height = Math.Max(this.Height, 420);
 
             this.Shown += async (_, __) =>
             {

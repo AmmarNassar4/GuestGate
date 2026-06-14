@@ -6,8 +6,8 @@
     <!-- API base path (can be empty or /api or /backend/api ...) -->
     <ApiBasePath>/api</ApiBasePath>
     <!-- Tablets / Kids list -->
-    <Kids>K1,K2,K3</Kids>
+    <Kids>1,2,3</Kids>
     <!-- Preferred tablet (will be updated from the app) -->
-    <PreferredKid>K3</PreferredKid>
+    <PreferredKid>3</PreferredKid>
   </appSettings>
 </configuration>
