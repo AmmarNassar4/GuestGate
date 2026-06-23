@@ -1,7 +1,11 @@
 using GuestGate.Api.Data;
+using GuestGate.Api.Hubs;
 using GuestGate.Api.Models;
+using GuestGate.Api.Services;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Data;
 
 namespace GuestGate.Api.Endpoints;
 
@@ -9,44 +13,72 @@ internal static class KioskStateEndpoints
 {
     public static IEndpointRouteBuilder MapKioskStateEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/kiosk/state", async Task<IResult> (int kid, AppDb db, IOptions<KioskOptions> opt) =>
+        app.MapGet("/api/kiosk/state", async Task<IResult> (int kid, AppDb db, IOptions<KioskOptions> opt, IOptions<ConsentRequestOptions> consentOptions, IHubContext<GuestHub> hub, CancellationToken ct) =>
         {
             if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
             var options = opt.Value;
+            var activeLifetime = consentOptions.Value.ActiveLifetime;
             var idlePollMs = Math.Clamp(options.IdlePollMs, 2000, 60000);
             var activePollMs = Math.Clamp(options.ActivePollMs, 1000, 30000);
             var consentPollMs = Math.Clamp(options.ConsentPollMs, 500, 10000);
 
-            var consentCandidate = await db.ConsentRequests
+            await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var now = DateTime.UtcNow;
+            var cancelledRequests = await ConsentRequestMaintenance.MarkExpiredActiveRequestsAsync(db, now, activeLifetime, kid, ct);
+
+            var activeConsents = (await db.ConsentRequests
                 .Where(x => x.Kid == kid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
-                .OrderBy(x => x.Id)
-                .Select(x => new { x.Id, x.Status })
-                .FirstOrDefaultAsync();
+                .OrderByDescending(x => x.Id)
+                .ToListAsync(ct))
+                .Where(x => ConsentRequestMaintenance.IsActive(x.Status))
+                .ToList();
 
-            if (consentCandidate is not null)
+            var consent = activeConsents.FirstOrDefault();
+            var supersededConsents = activeConsents.Skip(1).ToList();
+            ConsentRequestMaintenance.MarkCancelled(supersededConsents, now);
+            cancelledRequests.AddRange(supersededConsents);
+
+            if (consent is not null)
             {
-                var consent = await db.ConsentRequests.FirstOrDefaultAsync(x => x.Id == consentCandidate.Id);
-                if (consent is not null)
+                if (consent.Status == ConsentStatus.Waiting)
                 {
-                    if (consent.Status == ConsentStatus.Waiting)
-                    {
-                        consent.Status = ConsentStatus.Assigned;
-                        consent.UpdatedAt = DateTime.UtcNow;
-                        await db.SaveChangesAsync();
-                    }
-
-                    return Results.Ok(new
-                    {
-                        hasWork = true,
-                        nextPollMs = consentPollMs,
-                        consent = ToConsentDto(consent),
-                        session = (object?)null
-                    });
+                    consent.Status = ConsentStatus.Assigned;
+                    consent.UpdatedAt = now;
                 }
+
+                if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+
+                foreach (var cancelled in cancelledRequests)
+                {
+                    await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, cancelled, ct);
+                }
+
+                return Results.Ok(new
+                {
+                    hasWork = true,
+                    nextPollMs = consentPollMs,
+                    consent = ToConsentDto(consent, activeLifetime),
+                    session = (object?)null
+                });
             }
 
-            var now = DateTime.UtcNow;
+            if (cancelledRequests.Count > 0)
+            {
+                await db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+
+                foreach (var cancelled in cancelledRequests)
+                {
+                    await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, cancelled, ct);
+                }
+            }
+            else
+            {
+                await tx.CommitAsync(ct);
+            }
+
             var session = await db.KioskSessions
                 .AsNoTracking()
                 .Where(x => x.Kid == kid && x.Status == SessionStatus.Active)
@@ -109,7 +141,7 @@ internal static class KioskStateEndpoints
         return app;
     }
 
-    private static object ToConsentDto(ConsentRequest request)
+    private static object ToConsentDto(ConsentRequest request, TimeSpan activeLifetime)
     {
         return new
         {
@@ -124,6 +156,7 @@ internal static class KioskStateEndpoints
             status = request.Status.ToString(),
             accepted = request.Accepted,
             signedAt = request.SignedAt,
+            expiresAt = ConsentRequestMaintenance.GetExpiresAtUtc(request, activeLifetime),
             pdfPath = request.PdfPath
         };
     }

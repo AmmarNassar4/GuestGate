@@ -23,6 +23,7 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<KioskOptions>(builder.Configuration.GetSection("Kiosk"));
+builder.Services.Configure<ConsentRequestOptions>(builder.Configuration.GetSection("ConsentRequests"));
 builder.Services.AddDbContext<AppDb>(o => o.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
 builder.Services.AddSignalR();
 builder.Services.AddCors(o =>
@@ -43,6 +44,7 @@ builder.Host.UseSerilog((ctx, services, lg) =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHostedService<SessionExpiryWorker>();
+builder.Services.AddHostedService<ConsentExpiryWorker>();
 builder.Services.AddScoped<IConsentPdfWriter, ConsentPdfWriter>();
 
 if (builder.Configuration.GetValue<bool>("ConsentWatcher:FallbackEnabled"))

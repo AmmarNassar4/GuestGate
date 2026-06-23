@@ -4,6 +4,7 @@ using GuestGate.Api.Models;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Data;
 using System.Text.Json;
 
 namespace GuestGate.Api.Endpoints;
@@ -14,7 +15,7 @@ internal static class SessionManagementEndpoints
     {
         var api = app.MapGroup("/api");
 
-        api.MapPost("/sessions/start", async Task<IResult> (HttpRequest req, int? kid, string? templateId, AppDb db, IOptions<KioskOptions> opt, IHubContext<GuestHub> hub) =>
+        api.MapPost("/sessions/start", async Task<IResult> (HttpRequest req, int? kid, string? templateId, AppDb db, IOptions<KioskOptions> opt, IHubContext<GuestHub> hub, CancellationToken ct) =>
         {
             SessionStartDto? body = null;
             try { body = await req.ReadFromJsonAsync<SessionStartDto>(); } catch { }
@@ -32,42 +33,40 @@ internal static class SessionManagementEndpoints
             }
 
             var now = DateTime.UtcNow;
-            var active = await db.KioskSessions
+            await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+
+            var activeSessions = await db.KioskSessions
                 .Where(s => s.Kid == kioskId && s.Status == SessionStatus.Active)
                 .OrderByDescending(s => s.Id)
-                .FirstOrDefaultAsync();
+                .ToListAsync(ct);
 
-            if (active is not null && active.ExpiresAt <= now)
+            foreach (var session in activeSessions)
             {
-                active.Status = SessionStatus.Expired;
-                active.UpdatedAt = now;
-                active = null;
+                session.Status = session.ExpiresAt <= now ? SessionStatus.Expired : SessionStatus.Cancelled;
+                session.UpdatedAt = now;
             }
 
-            if (active is null)
+            var active = new KioskSession
             {
-                active = new KioskSession
-                {
-                    Kid = kioskId,
-                    EditToken = Guid.NewGuid(),
-                    Status = SessionStatus.Active,
-                    ExpiresAt = now.AddMinutes(opt.Value.SessionMinutes),
-                    TemplateId = tpl,
-                    PrefillJson = prefillJson,
-                    CreatedAt = now,
-                    UpdatedAt = now
-                };
-                db.KioskSessions.Add(active);
-            }
-            else
+                Kid = kioskId,
+                EditToken = Guid.NewGuid(),
+                Status = SessionStatus.Active,
+                ExpiresAt = now.AddMinutes(opt.Value.SessionMinutes),
+                TemplateId = tpl,
+                PrefillJson = prefillJson,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            db.KioskSessions.Add(active);
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            foreach (var session in activeSessions.Where(x => x.Status == SessionStatus.Cancelled))
             {
-                active.Kid = kioskId;
-                if (!string.IsNullOrWhiteSpace(tpl)) active.TemplateId = tpl;
-                if (!string.IsNullOrWhiteSpace(prefillJson)) active.PrefillJson = prefillJson;
-                active.UpdatedAt = now;
+                await NotifySessionEndedAsync(hub, kioskId, session.Id, "cancelled");
             }
 
-            await db.SaveChangesAsync();
             var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, active.EditToken, kioskId);
             await NotifySessionStartedAsync(hub, active, kioskId, scanUrl);
             return Results.Ok(new { sessionId = active.Id, kid = kioskId, et = active.EditToken, scanUrl, expiresAt = active.ExpiresAt });
