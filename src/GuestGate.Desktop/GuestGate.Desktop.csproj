@@ -13,6 +13,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="GuestGate.ico" />
+    <None Include="config.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\..\..\Desktop\GuestGate.png">
@@ -33,9 +36,6 @@
     <PackageReference Include="Serilog.Sinks.Seq" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Update="ConsentRequestForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
     <Compile Update="ResultsForm - Copy.cs">
       <SubType>Form</SubType>
     </Compile>

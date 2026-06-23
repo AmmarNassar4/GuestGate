@@ -21,7 +21,7 @@ namespace GuestGate.Desktop
         private HubConnection _hub;
 
         private string _baseUrl = DefaultBaseUrl;
-        private string _currentKid = "K1";
+        private string _currentKid = "3";
         private string _selectedTemplateId = "";
         private JObject _selectedTemplateDef = new JObject();
         private int _activeSessionId = 0;
@@ -37,11 +37,11 @@ namespace GuestGate.Desktop
         public ReceptionForm()
         {
             InitializeComponent(); // ← عناصر الواجهة من الـ Designer
-            BuildConsentLauncherButton();
+            //BuildConsentLauncherButton();
 
             // قيم افتراضية
             if (_kidBox.Items.Count == 0)
-                _kidBox.Items.AddRange(new object[] { "K1", "K2", "K3" });
+                _kidBox.Items.AddRange(new object[] { "1", "2", "3" });
             _kidBox.SelectedIndex = 0;
 
             // ربط الأحداث (لا تضعها في Designer لتبقى القراءة واضحة)
@@ -49,7 +49,7 @@ namespace GuestGate.Desktop
             _templateBox.SelectedIndexChanged += async (_, __) => await LoadTemplateAndRenderReceptionForm();
             _startBtn.Click += async (_, __) => await StartSessionAsync();
             _endBtn.Click += async (_, __) => await EndSessionAsync();
-            _consentBtn.Click += (_, __) => OpenConsentRequestForm();
+            //_consentBtn.Click += (_, __) => OpenConsentRequestForm();
             _retryTimer.Tick += async (_, __) =>
             {
                 if (_hub == null || _hub.State == HubConnectionState.Disconnected)
@@ -61,7 +61,7 @@ namespace GuestGate.Desktop
             UpdateStartEnabled();
 
             // Bootstrap عند إظهار النافذة
-            this.Height = Math.Max(this.Height, 720);
+            this.Height = Math.Max(this.Height, 420);
 
             this.Shown += async (_, __) =>
             {
@@ -75,35 +75,9 @@ namespace GuestGate.Desktop
             };
         }
 
-        // =========================================================
-        // Consent approval launcher
-        // =========================================================
-        private void BuildConsentLauncherButton()
-        {
-            _consentBtn = new Button();
-            _consentBtn.Location = new Point(347, 10);
-            _consentBtn.Name = "_consentBtn";
-            _consentBtn.Size = new Size(120, 55);
-            _consentBtn.Text = "Consent form";
-            _consentBtn.UseVisualStyleBackColor = true;
-            _top.Controls.Add(_consentBtn);
+        
 
-            if (_top.Width < 490)
-            {
-                _top.Width = 490;
-                this.Width = Math.Max(this.Width, 510);
-            }
-        }
-
-        private void OpenConsentRequestForm()
-        {
-            var form = new ConsentRequestForm(_baseUrl, () => _currentKid);
-            form.RequestSent += delegate (object sender, ConsentRequestSentEventArgs e)
-            {
-                SetMsg("Approval request sent: #" + e.RequestId);
-            };
-            form.Show(this);
-        }
+       
 
         // =========================================================
         // UI helpers
@@ -766,44 +740,7 @@ namespace GuestGate.Desktop
             catch (Exception ex) { SetMsg("Start failed: " + ex.Message); }
         }
 
-        private async Task SendConsentRequestAsync()
-        {
-            if (_hub == null || _hub.State != HubConnectionState.Connected)
-            { SetMsg("Hub is offline."); return; }
-
-            try
-            {
-                var language = (_consentLanguage.SelectedItem as LanguageItem)?.Code ?? "en";
-                var body = new JObject
-                {
-                    ["kid"] = _currentKid,
-                    ["guestName"] = (_consentGuestName.Text ?? string.Empty).Trim(),
-                    ["language"] = language,
-                    ["termsEn"] = (_consentTermsEn.Text ?? string.Empty).Trim(),
-                    ["termsAr"] = (_consentTermsAr.Text ?? string.Empty).Trim()
-                };
-
-                string url = _baseUrl.TrimEnd('/') + "/api/consents";
-                using (var req = new HttpRequestMessage(HttpMethod.Post, url))
-                {
-                    req.Content = new StringContent(body.ToString(Newtonsoft.Json.Formatting.None), Encoding.UTF8, "application/json");
-                    using (var res = await _http.SendAsync(req))
-                    {
-                        if (res.IsSuccessStatusCode)
-                        {
-                            var json = await res.Content.ReadAsStringAsync();
-                            var created = JObject.Parse(json);
-                            SetMsg("Approval request sent: #" + (created["id"]?.ToString() ?? ""));
-                        }
-                        else
-                        {
-                            SetMsg(string.Format("Consent request failed: {0} {1}", (int)res.StatusCode, res.ReasonPhrase));
-                        }
-                    }
-                }
-            }
-            catch (Exception ex) { SetMsg("Consent request failed: " + ex.Message); }
-        }
+       
 
         private async Task EndSessionAsync()
         {
