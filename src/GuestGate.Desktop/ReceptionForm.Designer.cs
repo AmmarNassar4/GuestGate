@@ -100,6 +100,7 @@ namespace GuestGate.Desktop
             this.lblKid.Size = new System.Drawing.Size(65, 13);
             this.lblKid.TabIndex = 0;
             this.lblKid.Text = "Tablet (kid):";
+            this.lblKid.Click += new System.EventHandler(this.lblKid_Click);
             // 
             // _kidBox
             // 
@@ -154,7 +155,7 @@ namespace GuestGate.Desktop
             this._prefillHost.Location = new System.Drawing.Point(0, 86);
             this._prefillHost.Name = "_prefillHost";
             this._prefillHost.Padding = new System.Windows.Forms.Padding(12, 0, 12, 12);
-            this._prefillHost.Size = new System.Drawing.Size(371, 167);
+            this._prefillHost.Size = new System.Drawing.Size(371, 119);
             this._prefillHost.TabIndex = 1;
             // 
             // _prefillTable
@@ -185,7 +186,7 @@ namespace GuestGate.Desktop
             this._templateLbl,
             this.toolStripSeparator3,
             this._msgLbl});
-            this._status.Location = new System.Drawing.Point(0, 253);
+            this._status.Location = new System.Drawing.Point(0, 205);
             this._status.Name = "_status";
             this._status.Size = new System.Drawing.Size(371, 22);
             this._status.SizingGrip = false;
@@ -242,7 +243,7 @@ namespace GuestGate.Desktop
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(371, 275);
+            this.ClientSize = new System.Drawing.Size(371, 227);
             this.Controls.Add(this._prefillHost);
             this.Controls.Add(this._status);
             this.Controls.Add(this._top);
@@ -252,6 +253,7 @@ namespace GuestGate.Desktop
             this.Name = "ReceptionForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "GuestGate — Reception";
+            this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.ReceptionForm_FormClosing);
             this._top.ResumeLayout(false);
             this._top.PerformLayout();
             this._prefillHost.ResumeLayout(false);

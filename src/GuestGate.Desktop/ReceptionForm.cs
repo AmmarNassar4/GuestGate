@@ -891,5 +891,16 @@ namespace GuestGate.Desktop
         {
 
         }
+
+        private void ReceptionForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            this.WindowState= FormWindowState.Minimized;
+            e.Cancel = true;
+        }
+
+        private void lblKid_Click(object sender, EventArgs e)
+        {
+            System.Windows.Forms.Application.ExitThread();
+        }
     }
 }
