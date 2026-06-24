@@ -3,7 +3,7 @@ namespace GuestGate.Api.Models
     public class KioskOptions
     {
         public string MobileBaseUrl { get; set; } = default!;
-        public int SessionMinutes { get; set; }
+        public int SessionMinutes { get; set; } = 10;
         public int IdleToScreensaverMs { get; set; } = 120000;
         public int IdlePollMs { get; set; } = 5000;
         public int ActivePollMs { get; set; } = 3000;

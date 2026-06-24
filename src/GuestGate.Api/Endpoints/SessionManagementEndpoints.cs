@@ -1,6 +1,7 @@
 using GuestGate.Api.Data;
 using GuestGate.Api.Hubs;
 using GuestGate.Api.Models;
+using GuestGate.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -46,6 +47,13 @@ internal static class SessionManagementEndpoints
                 session.UpdatedAt = now;
             }
 
+            var activeConsents = await db.ConsentRequests
+                .Where(x => x.Kid == kioskId && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
+                .OrderByDescending(x => x.Id)
+                .ToListAsync(ct);
+
+            ConsentRequestMaintenance.MarkCancelled(activeConsents, now);
+
             var active = new KioskSession
             {
                 Kid = kioskId,
@@ -65,6 +73,11 @@ internal static class SessionManagementEndpoints
             foreach (var session in activeSessions.Where(x => x.Status == SessionStatus.Cancelled))
             {
                 await NotifySessionEndedAsync(hub, kioskId, session.Id, "cancelled");
+            }
+
+            foreach (var consent in activeConsents)
+            {
+                await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, consent, ct);
             }
 
             var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, active.EditToken, kioskId);

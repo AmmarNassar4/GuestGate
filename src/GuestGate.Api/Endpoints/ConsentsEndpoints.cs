@@ -40,6 +40,17 @@ internal static class ConsentsEndpoints
             ConsentRequestMaintenance.MarkCancelled(activeRequests, now);
             cancelledRequests.AddRange(activeRequests);
 
+            var activeSessions = await db.KioskSessions
+                .Where(s => s.Kid == kid && s.Status == SessionStatus.Active)
+                .OrderByDescending(s => s.Id)
+                .ToListAsync(ct);
+
+            foreach (var session in activeSessions)
+            {
+                session.Status = session.ExpiresAt <= now ? SessionStatus.Expired : SessionStatus.Cancelled;
+                session.UpdatedAt = now;
+            }
+
             var request = new ConsentRequest
             {
                 Kid = kid,
@@ -65,6 +76,11 @@ internal static class ConsentsEndpoints
             foreach (var cancelled in cancelledRequests)
             {
                 await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, cancelled, ct);
+            }
+
+            foreach (var session in activeSessions.Where(x => x.Status == SessionStatus.Cancelled))
+            {
+                await NotifySessionEndedAsync(hub, kid, session.Id, "cancelled", ct);
             }
 
             await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, request.Kid, request.Id, ConsentStatus.Waiting, cancellationToken: ct);
@@ -235,6 +251,11 @@ internal static class ConsentsEndpoints
         }
 
         return Results.Ok(new { ok = true, cancelledCount = requests.Count });
+    }
+
+    private static Task NotifySessionEndedAsync(IHubContext<GuestHub> hub, int kid, int sessionId, string reason, CancellationToken cancellationToken)
+    {
+        return hub.Clients.Group(GuestHub.KioskGroup(kid)).SendAsync("sessionEnded", new { kid, sessionId, reason }, cancellationToken);
     }
 
     private static bool TryParseKid(JsonElement value, out int kid)
