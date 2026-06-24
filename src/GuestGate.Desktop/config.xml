@@ -2,7 +2,7 @@
 <configuration>
   <appSettings>
     <!-- Base URL of the server -->
-    <DefaultBaseUrl>https://guestgate-ramada.ibaapps.work</DefaultBaseUrl>
+    <DefaultBaseUrl>http://localhost:5264</DefaultBaseUrl>
     <!-- API base path (can be empty or /api or /backend/api ...) -->
     <ApiBasePath>/api</ApiBasePath>
     <!-- Tablets / Kids list -->
