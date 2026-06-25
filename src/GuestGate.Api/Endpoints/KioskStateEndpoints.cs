@@ -109,7 +109,9 @@ internal static class KioskStateEndpoints
                 await db.Database.ExecuteSqlInterpolatedAsync($@"
                     UPDATE dbo.KioskSessions
                        SET Status = {(byte)SessionStatus.Expired}, UpdatedAt = SYSUTCDATETIME()
-                     WHERE Id = {session.Id} AND Status = {(byte)SessionStatus.Active};");
+                     WHERE Id = {session.Id} AND Status = {(byte)SessionStatus.Active};", ct);
+
+                await NotifySessionEndedAsync(hub, session.Kid, session.Id, "expired", ct);
 
                 return Results.Ok(new
                 {
@@ -165,5 +167,10 @@ internal static class KioskStateEndpoints
     {
         var separator = mobileBaseUrl.Contains('?') ? "&" : "?";
         return $"{mobileBaseUrl}{separator}et={editToken}&kid={kid}";
+    }
+
+    private static Task NotifySessionEndedAsync(IHubContext<GuestHub> hub, int kid, int sessionId, string reason, CancellationToken cancellationToken)
+    {
+        return hub.Clients.Group(GuestHub.KioskGroup(kid)).SendAsync("sessionEnded", new { kid, sessionId, reason }, cancellationToken);
     }
 }

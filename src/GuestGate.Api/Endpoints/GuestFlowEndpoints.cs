@@ -14,10 +14,11 @@ internal static class GuestFlowEndpoints
     {
         var api = app.MapGroup("/api");
 
-        app.MapGet("/api/mobile/form-config", async Task<IResult> (Guid et, AppDb db) =>
+        app.MapGet("/api/mobile/form-config", async Task<IResult> (Guid et, AppDb db, IHubContext<GuestHub> hub) =>
         {
             var s = await db.KioskSessions.FirstOrDefaultAsync(x => x.EditToken == et && x.Status == SessionStatus.Active);
             if (s is null) return Results.NotFound(new { error = "Session not found" });
+            if (await ExpireIfNeededAsync(s, db, hub)) return Results.StatusCode(StatusCodes.Status410Gone);
 
             var tplId = s.TemplateId ?? "T1";
             var t = await db.Templates.AsNoTracking().FirstOrDefaultAsync(x => x.Id == tplId);
@@ -27,7 +28,7 @@ internal static class GuestFlowEndpoints
             return Results.Content(GuestFormBuilder.BuildGuestFormConfigJson(tplId, t.DataJson, prefill), "application/json");
         });
 
-        app.MapGet("/tablet/{kid:int}/form-config", async Task<IResult> (int kid, AppDb db) =>
+        app.MapGet("/tablet/{kid:int}/form-config", async Task<IResult> (int kid, AppDb db, IHubContext<GuestHub> hub) =>
         {
             if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
@@ -37,6 +38,7 @@ internal static class GuestFlowEndpoints
                 .FirstOrDefaultAsync();
 
             if (s is null) return Results.NotFound(new { error = "Active session not found" });
+            if (await ExpireIfNeededAsync(s, db, hub)) return Results.StatusCode(StatusCodes.Status410Gone);
 
             var tplId = s.TemplateId ?? "T1";
             var t = await db.Templates.AsNoTracking().FirstOrDefaultAsync(x => x.Id == tplId);
@@ -109,7 +111,9 @@ internal static class GuestFlowEndpoints
             if (s.ExpiresAt <= now)
             {
                 s.Status = SessionStatus.Expired;
+                s.UpdatedAt = now;
                 await db.SaveChangesAsync();
+                await NotifySessionEndedAsync(hub, s.Kid, s.Id, "expired");
                 return Results.StatusCode(410);
             }
 
@@ -142,5 +146,21 @@ internal static class GuestFlowEndpoints
         .Produces(StatusCodes.Status410Gone);
 
         return app;
+    }
+
+    private static async Task<bool> ExpireIfNeededAsync(KioskSession session, AppDb db, IHubContext<GuestHub> hub)
+    {
+        if (session.ExpiresAt > DateTime.UtcNow) return false;
+
+        session.Status = SessionStatus.Expired;
+        session.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        await NotifySessionEndedAsync(hub, session.Kid, session.Id, "expired");
+        return true;
+    }
+
+    private static Task NotifySessionEndedAsync(IHubContext<GuestHub> hub, int kid, int sessionId, string reason)
+    {
+        return hub.Clients.Group(GuestHub.KioskGroup(kid)).SendAsync("sessionEnded", new { kid, sessionId, reason });
     }
 }

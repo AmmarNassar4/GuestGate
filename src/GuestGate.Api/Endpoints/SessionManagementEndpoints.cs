@@ -43,7 +43,7 @@ internal static class SessionManagementEndpoints
 
             foreach (var session in activeSessions)
             {
-                session.Status = session.ExpiresAt <= now ? SessionStatus.Expired : SessionStatus.Cancelled;
+                session.Status = SessionStatus.Cancelled;
                 session.UpdatedAt = now;
             }
 
@@ -70,7 +70,7 @@ internal static class SessionManagementEndpoints
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
 
-            foreach (var session in activeSessions.Where(x => x.Status == SessionStatus.Cancelled))
+            foreach (var session in activeSessions)
             {
                 await NotifySessionEndedAsync(hub, kioskId, session.Id, "cancelled");
             }
@@ -85,7 +85,7 @@ internal static class SessionManagementEndpoints
             return Results.Ok(new { sessionId = active.Id, kid = kioskId, et = active.EditToken, scanUrl, expiresAt = active.ExpiresAt });
         });
 
-        api.MapGet("/sessions/active", async Task<IResult> (int kid, AppDb db, IOptions<KioskOptions> opt) =>
+        api.MapGet("/sessions/active", async Task<IResult> (int kid, AppDb db, IOptions<KioskOptions> opt, IHubContext<GuestHub> hub) =>
         {
             if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
@@ -101,6 +101,7 @@ internal static class SessionManagementEndpoints
                 s.Status = SessionStatus.Expired;
                 s.UpdatedAt = now;
                 await db.SaveChangesAsync();
+                await NotifySessionEndedAsync(hub, kid, s.Id, "expired");
                 return Results.NoContent();
             }
 

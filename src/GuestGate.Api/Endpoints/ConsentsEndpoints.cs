@@ -47,7 +47,7 @@ internal static class ConsentsEndpoints
 
             foreach (var session in activeSessions)
             {
-                session.Status = session.ExpiresAt <= now ? SessionStatus.Expired : SessionStatus.Cancelled;
+                session.Status = SessionStatus.Cancelled;
                 session.UpdatedAt = now;
             }
 
@@ -78,7 +78,7 @@ internal static class ConsentsEndpoints
                 await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, cancelled, ct);
             }
 
-            foreach (var session in activeSessions.Where(x => x.Status == SessionStatus.Cancelled))
+            foreach (var session in activeSessions)
             {
                 await NotifySessionEndedAsync(hub, kid, session.Id, "cancelled", ct);
             }
