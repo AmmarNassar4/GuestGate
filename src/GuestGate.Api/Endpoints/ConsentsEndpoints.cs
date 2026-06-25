@@ -73,16 +73,6 @@ internal static class ConsentsEndpoints
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
 
-            foreach (var cancelled in cancelledRequests)
-            {
-                await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, cancelled, ct);
-            }
-
-            foreach (var session in activeSessions)
-            {
-                await NotifySessionEndedAsync(hub, kid, session.Id, "cancelled", ct);
-            }
-
             await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, request.Kid, request.Id, ConsentStatus.Waiting, cancellationToken: ct);
             return Results.Ok(ToConsentDto(request, activeLifetime));
         });

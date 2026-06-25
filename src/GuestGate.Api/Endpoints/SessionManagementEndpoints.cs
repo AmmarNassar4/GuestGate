@@ -70,16 +70,6 @@ internal static class SessionManagementEndpoints
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
 
-            foreach (var session in activeSessions)
-            {
-                await NotifySessionEndedAsync(hub, kioskId, session.Id, "cancelled");
-            }
-
-            foreach (var consent in activeConsents)
-            {
-                await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, consent, ct);
-            }
-
             var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, active.EditToken, kioskId);
             await NotifySessionStartedAsync(hub, active, kioskId, scanUrl);
             return Results.Ok(new { sessionId = active.Id, kid = kioskId, et = active.EditToken, scanUrl, expiresAt = active.ExpiresAt });
