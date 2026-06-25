@@ -8,7 +8,7 @@
     <!-- Tablets / Kids list -->
     <Kids>1,2,3</Kids>
     <!-- Preferred tablet (will be updated from the app) -->
-    <PreferredKid>K3</PreferredKid>
+    <PreferredKid>3</PreferredKid>
     <!-- Preferred template name or template ID -->
     <PreferredTemplateName></PreferredTemplateName>
   </appSettings>
