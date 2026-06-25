@@ -159,7 +159,25 @@ internal static class ConsentsEndpoints
         });
 
         api.MapDelete("/consents/active", CancelActiveConsentsForKidAsync);
-        app.MapPost("/api/consents/cancel", CancelActiveConsentsForKidAsync);
+        app.MapPost("/api/consents/cancel", async Task<IResult> (string kid, bool? force, AppDb db, IHubContext<GuestHub> hub, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        {
+            if (force != true)
+            {
+                loggerFactory
+                    .CreateLogger("GuestGate.Api.Consents")
+                    .LogWarning("Ignored legacy POST consent cancel request for kiosk {Kid}. Use DELETE /api/consents/active or append force=true for an explicit cancel.", kid);
+
+                return Results.Ok(new
+                {
+                    ok = true,
+                    skipped = true,
+                    cancelledCount = 0,
+                    reason = "POST /api/consents/cancel requires force=true. Use DELETE /api/consents/active for explicit cancellation."
+                });
+            }
+
+            return await CancelActiveConsentsForKidAsync(kid, db, hub, loggerFactory, ct);
+        });
 
         api.MapPost("/consents/{id:int}/sign", async Task<IResult> (int id, ConsentSignDto body, AppDb db, IConsentPdfWriter pdfWriter, IHubContext<GuestHub> hub, IOptions<ConsentRequestOptions> consentOptions, CancellationToken ct) =>
         {
@@ -219,7 +237,7 @@ internal static class ConsentsEndpoints
         };
     }
 
-    private static async Task<IResult> CancelActiveConsentsForKidAsync(string kid, AppDb db, IHubContext<GuestHub> hub, CancellationToken ct)
+    private static async Task<IResult> CancelActiveConsentsForKidAsync(string kid, AppDb db, IHubContext<GuestHub> hub, ILoggerFactory loggerFactory, CancellationToken ct)
     {
         if (!TryParseKid(kid, out var parsedKid)) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
@@ -232,6 +250,10 @@ internal static class ConsentsEndpoints
 
         var now = DateTime.UtcNow;
         ConsentRequestMaintenance.MarkCancelled(requests, now);
+
+        loggerFactory
+            .CreateLogger("GuestGate.Api.Consents")
+            .LogInformation("Cancelling {Count} active consent request(s) for kiosk {Kid}: {ConsentIds}", requests.Count, parsedKid, string.Join(",", requests.Select(x => x.Id)));
 
         await db.SaveChangesAsync(ct);
 
