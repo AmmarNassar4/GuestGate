@@ -1,3 +1,5 @@
+using System.Data;
+using System.Data.Common;
 using GuestGate.Api.Data;
 using GuestGate.Api.Hubs;
 using GuestGate.Api.Models;
@@ -5,6 +7,8 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuestGate.Api.Services;
+
+internal sealed record CancelledConsent(int Id, int Kid, string? PdfPath);
 
 internal static class ConsentRequestMaintenance
 {
@@ -23,7 +27,10 @@ internal static class ConsentRequestMaintenance
         return request.CreatedAt.Add(activeLifetime);
     }
 
-    public static async Task<List<ConsentRequest>> MarkExpiredActiveRequestsAsync(
+    // Single atomic UPDATE ... OUTPUT: takes only row-level X locks, so concurrent
+    // callers (kiosk polls, /consents endpoints, ConsentExpiryWorker) cannot deadlock
+    // the way the old Serializable read-then-update transaction did.
+    public static async Task<List<CancelledConsent>> CancelExpiredActiveRequestsAsync(
         AppDb db,
         DateTime nowUtc,
         TimeSpan activeLifetime,
@@ -31,20 +38,47 @@ internal static class ConsentRequestMaintenance
         CancellationToken cancellationToken = default)
     {
         var cutoffUtc = nowUtc.Subtract(activeLifetime);
-        var query = db.ConsentRequests
-            .Where(x => (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned) && x.CreatedAt <= cutoffUtc);
-
-        if (kid.HasValue)
+        var connection = db.Database.GetDbConnection();
+        await db.Database.OpenConnectionAsync(cancellationToken);
+        try
         {
-            query = query.Where(x => x.Kid == kid.Value);
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+UPDATE [dbo].[ConsentRequests]
+   SET [Status] = N'cancelled', [UpdatedAt] = @now
+OUTPUT [inserted].[Id], [inserted].[Kid], [inserted].[PdfPath]
+ WHERE [Status] IN (N'waiting', N'assigned') AND [CreatedAt] <= @cutoff"
+                + (kid.HasValue ? " AND [Kid] = @kid;" : ";");
+
+            AddParameter(command, "@now", DbType.DateTime2, nowUtc);
+            AddParameter(command, "@cutoff", DbType.DateTime2, cutoffUtc);
+            if (kid.HasValue) AddParameter(command, "@kid", DbType.Int32, kid.Value);
+
+            var cancelled = new List<CancelledConsent>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                cancelled.Add(new CancelledConsent(
+                    reader.GetInt32(0),
+                    reader.GetInt32(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2)));
+            }
+
+            return cancelled;
         }
+        finally
+        {
+            await db.Database.CloseConnectionAsync();
+        }
+    }
 
-        var requests = await query
-            .OrderBy(x => x.Id)
-            .ToListAsync(cancellationToken);
-
-        MarkCancelled(requests, nowUtc);
-        return requests;
+    private static void AddParameter(DbCommand command, string name, DbType type, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.DbType = type;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 
     public static void MarkCancelled(IEnumerable<ConsentRequest> requests, DateTime nowUtc)
@@ -53,6 +87,17 @@ internal static class ConsentRequestMaintenance
         {
             request.Status = ConsentStatus.Cancelled;
             request.UpdatedAt = nowUtc;
+        }
+    }
+
+    public static async Task NotifyCancelledAsync(
+        IHubContext<GuestHub> hub,
+        IEnumerable<CancelledConsent> cancelled,
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var consent in cancelled)
+        {
+            await NotifyConsentChangedAsync(hub, consent.Kid, consent.Id, ConsentStatus.Cancelled, consent.PdfPath, cancellationToken);
         }
     }
 

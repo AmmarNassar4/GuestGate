@@ -47,25 +47,19 @@ public sealed class ConsentExpiryWorker(
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDb>();
             var now = DateTime.UtcNow;
-            var expiredRequests = await ConsentRequestMaintenance.MarkExpiredActiveRequestsAsync(
+            var cancelled = await ConsentRequestMaintenance.CancelExpiredActiveRequestsAsync(
                 db,
                 now,
                 _consentOptions.Value.ActiveLifetime,
                 cancellationToken: stoppingToken);
 
-            if (expiredRequests.Count == 0)
+            if (cancelled.Count == 0)
             {
                 return;
             }
 
-            await db.SaveChangesAsync(stoppingToken);
-
-            foreach (var request in expiredRequests)
-            {
-                await ConsentRequestMaintenance.NotifyConsentChangedAsync(_hub, request, stoppingToken);
-            }
-
-            _logger.LogInformation("Cancelled {Count} expired consent requests.", expiredRequests.Count);
+            await ConsentRequestMaintenance.NotifyCancelledAsync(_hub, cancelled, stoppingToken);
+            _logger.LogInformation("Cancelled {Count} expired consent requests.", cancelled.Count);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

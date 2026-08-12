@@ -5,7 +5,6 @@ using GuestGate.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using System.Data;
 using System.Text.Json;
 
 namespace GuestGate.Api.Endpoints;
@@ -34,25 +33,20 @@ internal static class SessionManagementEndpoints
             }
 
             var now = DateTime.UtcNow;
-            await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
 
-            var activeSessions = await db.KioskSessions
+            // Atomic set-based supersede: cancel prior sessions and consents without
+            // a Serializable transaction (the old pattern deadlocked under load).
+            await db.KioskSessions
                 .Where(s => s.Kid == kioskId && s.Status == SessionStatus.Active)
-                .OrderByDescending(s => s.Id)
-                .ToListAsync(ct);
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.Status, SessionStatus.Cancelled)
+                    .SetProperty(x => x.UpdatedAt, now), ct);
 
-            foreach (var session in activeSessions)
-            {
-                session.Status = SessionStatus.Cancelled;
-                session.UpdatedAt = now;
-            }
-
-            var activeConsents = await db.ConsentRequests
+            await db.ConsentRequests
                 .Where(x => x.Kid == kioskId && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
-                .OrderByDescending(x => x.Id)
-                .ToListAsync(ct);
-
-            ConsentRequestMaintenance.MarkCancelled(activeConsents, now);
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.Status, ConsentStatus.Cancelled)
+                    .SetProperty(x => x.UpdatedAt, now), ct);
 
             var active = new KioskSession
             {
@@ -68,7 +62,6 @@ internal static class SessionManagementEndpoints
 
             db.KioskSessions.Add(active);
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
 
             var scanUrl = BuildScanUrl(opt.Value.MobileBaseUrl, active.EditToken, kioskId);
             await NotifySessionStartedAsync(hub, active, kioskId, scanUrl);
@@ -99,37 +92,22 @@ internal static class SessionManagementEndpoints
             return Results.Ok(new { sessionId = s.Id, kid = s.Kid, et = s.EditToken, scanUrl, expiresAt = s.ExpiresAt });
         });
 
-        api.MapDelete("/sessions/active", async Task<IResult> (int kid, AppDb db, IHubContext<GuestHub> hub) =>
+        // Cancel = purge: hard-deletes the active session row(s) and any guest data
+        // linked to them, then broadcasts sessionEnded so kiosks reset immediately.
+        api.MapDelete("/sessions/active", async Task<IResult> (int kid, AppDb db, IHubContext<GuestHub> hub, CancellationToken ct) =>
         {
             if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
-            var s = await db.KioskSessions
-                .Where(x => x.Kid == kid && x.Status == SessionStatus.Active)
-                .OrderByDescending(x => x.Id)
-                .FirstOrDefaultAsync();
-
-            if (s is null) return Results.NoContent();
-            s.Status = SessionStatus.Cancelled;
-            s.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync();
-            await NotifySessionEndedAsync(hub, kid, s.Id, "cancelled");
+            await PurgeActiveSessionsAsync(db, kid, hub, ct);
             return Results.NoContent();
         });
 
-        app.MapPost("/api/sessions/cancel", async Task<IResult> (AppDb db, int kid, IHubContext<GuestHub> hub) =>
+        app.MapPost("/api/sessions/cancel", async Task<IResult> (AppDb db, int kid, IHubContext<GuestHub> hub, CancellationToken ct) =>
         {
             if (kid <= 0) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
-            var s = await db.KioskSessions
-                .Where(x => x.Kid == kid && x.Status == SessionStatus.Active)
-                .OrderByDescending(x => x.Id)
-                .FirstOrDefaultAsync();
-
-            if (s is null) return Results.NotFound(new { error = "No active session to cancel" });
-            s.Status = SessionStatus.Cancelled;
-            s.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync();
-            await NotifySessionEndedAsync(hub, kid, s.Id, "cancelled");
+            var purged = await PurgeActiveSessionsAsync(db, kid, hub, ct);
+            if (purged == 0) return Results.NotFound(new { error = "No active session to cancel" });
             return Results.NoContent();
         });
 
@@ -145,6 +123,37 @@ internal static class SessionManagementEndpoints
         });
 
         return app;
+    }
+
+    internal static async Task<int> PurgeActiveSessionsAsync(AppDb db, int kid, IHubContext<GuestHub> hub, CancellationToken ct)
+    {
+        var sessions = await db.KioskSessions
+            .AsNoTracking()
+            .Where(x => x.Kid == kid && x.Status == SessionStatus.Active)
+            .Select(x => new { x.Id, x.GuestId })
+            .ToListAsync(ct);
+
+        if (sessions.Count == 0) return 0;
+
+        var sessionIds = sessions.Select(x => x.Id).ToList();
+        await db.KioskSessions
+            .Where(x => sessionIds.Contains(x.Id))
+            .ExecuteDeleteAsync(ct);
+
+        var guestIds = sessions.Where(x => x.GuestId.HasValue).Select(x => x.GuestId!.Value).ToList();
+        if (guestIds.Count > 0)
+        {
+            await db.Guests
+                .Where(g => guestIds.Contains(g.Id))
+                .ExecuteDeleteAsync(ct);
+        }
+
+        foreach (var id in sessionIds)
+        {
+            await NotifySessionEndedAsync(hub, kid, id, "cancelled");
+        }
+
+        return sessions.Count;
     }
 
     private static string BuildScanUrl(string mobileBaseUrl, Guid editToken, int kid)

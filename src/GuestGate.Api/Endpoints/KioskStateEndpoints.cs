@@ -5,7 +5,6 @@ using GuestGate.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using System.Data;
 
 namespace GuestGate.Api.Endpoints;
 
@@ -23,38 +22,44 @@ internal static class KioskStateEndpoints
             var activePollMs = Math.Clamp(options.ActivePollMs, 1000, 30000);
             var consentPollMs = Math.Clamp(options.ConsentPollMs, 500, 10000);
 
-            await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             var now = DateTime.UtcNow;
-            var cancelledRequests = await ConsentRequestMaintenance.MarkExpiredActiveRequestsAsync(db, now, activeLifetime, kid, ct);
+            var cancelledConsents = await ConsentRequestMaintenance.CancelExpiredActiveRequestsAsync(db, now, activeLifetime, kid, ct);
 
-            var activeConsents = (await db.ConsentRequests
+            var activeConsents = await db.ConsentRequests
+                .AsNoTracking()
                 .Where(x => x.Kid == kid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
                 .OrderByDescending(x => x.Id)
-                .ToListAsync(ct))
-                .Where(x => ConsentRequestMaintenance.IsActive(x.Status))
-                .ToList();
+                .ToListAsync(ct);
 
             var consent = activeConsents.FirstOrDefault();
             var supersededConsents = activeConsents.Skip(1).ToList();
-            ConsentRequestMaintenance.MarkCancelled(supersededConsents, now);
-            cancelledRequests.AddRange(supersededConsents);
+            if (supersededConsents.Count > 0)
+            {
+                var supersededIds = supersededConsents.Select(x => x.Id).ToList();
+                await db.ConsentRequests
+                    .Where(x => supersededIds.Contains(x.Id) && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(x => x.Status, ConsentStatus.Cancelled)
+                        .SetProperty(x => x.UpdatedAt, now), ct);
+                cancelledConsents.AddRange(supersededConsents.Select(x => new CancelledConsent(x.Id, x.Kid, x.PdfPath)));
+            }
+
+            if (consent is not null && consent.Status == ConsentStatus.Waiting)
+            {
+                // Conditional claim: only flips waiting -> assigned; a concurrent poll
+                // that already claimed or cancelled the row makes this a no-op.
+                await db.ConsentRequests
+                    .Where(x => x.Id == consent.Id && x.Status == ConsentStatus.Waiting)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(x => x.Status, ConsentStatus.Assigned)
+                        .SetProperty(x => x.UpdatedAt, now), ct);
+                consent.Status = ConsentStatus.Assigned;
+            }
+
+            await ConsentRequestMaintenance.NotifyCancelledAsync(hub, cancelledConsents, ct);
 
             if (consent is not null)
             {
-                if (consent.Status == ConsentStatus.Waiting)
-                {
-                    consent.Status = ConsentStatus.Assigned;
-                    consent.UpdatedAt = now;
-                }
-
-                if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct);
-                await tx.CommitAsync(ct);
-
-                foreach (var cancelled in cancelledRequests)
-                {
-                    await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, cancelled, ct);
-                }
-
                 return Results.Ok(new
                 {
                     hasWork = true,
@@ -62,21 +67,6 @@ internal static class KioskStateEndpoints
                     consent = ToConsentDto(consent, activeLifetime),
                     session = (object?)null
                 });
-            }
-
-            if (cancelledRequests.Count > 0)
-            {
-                await db.SaveChangesAsync(ct);
-                await tx.CommitAsync(ct);
-
-                foreach (var cancelled in cancelledRequests)
-                {
-                    await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, cancelled, ct);
-                }
-            }
-            else
-            {
-                await tx.CommitAsync(ct);
             }
 
             var session = await db.KioskSessions

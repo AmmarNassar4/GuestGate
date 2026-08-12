@@ -66,7 +66,7 @@
 
     @media (min-width: 768px) {
       .action-bar {
-        grid-template-columns: auto auto 1fr;
+        grid-template-columns: auto auto auto 1fr;
       }
     }
   </style>
@@ -83,6 +83,7 @@
       <div class="mt-3 action-bar">
         <button id="submitBtn" class="btn btn-primary btn-lg" type="submit">Submit</button>
         <button id="copyBtn" class="btn btn-outline-secondary btn-lg" type="button">Copy data</button>
+        <button id="cancelBtn" class="btn btn-outline-danger btn-lg" type="button">Cancel</button>
         <span id="msg" class="ms-md-2 text-primary"></span>
       </div>
     </form>
@@ -98,6 +99,7 @@
   const msg = document.getElementById('msg');
   const submitBtn = document.getElementById('submitBtn');
   const copyBtn = document.getElementById('copyBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
 
   if(!et){ setMsg('Invalid link: missing et', 'danger'); form.classList.add('d-none'); return; }
 
@@ -308,6 +310,29 @@
     } catch {
       setMsg('Network error while saving.', 'danger');
     } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  cancelBtn.addEventListener('click', async () => {
+    if(!confirm('Cancel this check-in? The session and any entered data will be permanently deleted.')) return;
+    cancelBtn.disabled = true;
+    submitBtn.disabled = true;
+    setMsg('Cancelling...', 'primary');
+    try{
+      const res = await fetch(`/api/mobile/session?et=${encodeURIComponent(et)}`, { method:'DELETE' });
+      if(res.ok){
+        form.classList.add('d-none');
+        setMsg('Session cancelled. You can close this page.', 'success');
+        setTimeout(()=> window.close(), 1500);
+      } else {
+        setMsg('Error cancelling: ' + res.status, 'danger');
+        cancelBtn.disabled = false;
+        submitBtn.disabled = false;
+      }
+    } catch {
+      setMsg('Network error while cancelling.', 'danger');
+      cancelBtn.disabled = false;
       submitBtn.disabled = false;
     }
   });

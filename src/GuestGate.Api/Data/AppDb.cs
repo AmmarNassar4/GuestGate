@@ -16,6 +16,7 @@ namespace GuestGate.Api.Data
             b.Entity<KioskSession>().HasIndex(x => new { x.Kid, x.Status });
             b.Entity<KioskSession>().HasIndex(x => new { x.Status, x.ExpiresAt });
             b.Entity<ConsentRequest>().HasIndex(x => new { x.Kid, x.Status });
+            b.Entity<ConsentRequest>().HasIndex(x => new { x.Status, x.CreatedAt });
             b.Entity<ConsentRequest>().Property(x => x.GuestName).HasMaxLength(200);
             b.Entity<ConsentRequest>().Property(x => x.IdentityNumber).HasMaxLength(80);
             b.Entity<ConsentRequest>().Property(x => x.CheckInTime).HasMaxLength(50);

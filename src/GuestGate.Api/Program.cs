@@ -24,7 +24,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<KioskOptions>(builder.Configuration.GetSection("Kiosk"));
 builder.Services.Configure<ConsentRequestOptions>(builder.Configuration.GetSection("ConsentRequests"));
-builder.Services.AddDbContext<AppDb>(o => o.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
+builder.Services.AddDbContext<AppDb>(o => o.UseSqlServer(
+    builder.Configuration.GetConnectionString("Default"),
+    sql => sql.EnableRetryOnFailure(maxRetryCount: 5, maxRetryDelay: TimeSpan.FromSeconds(5), errorNumbersToAdd: null)));
 builder.Services.AddSignalR();
 builder.Services.AddCors(o =>
 {

@@ -5,7 +5,6 @@ using GuestGate.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using System.Data;
 using System.Text.Json;
 
 namespace GuestGate.Api.Endpoints;
@@ -27,29 +26,21 @@ internal static class ConsentsEndpoints
             var language = ConsentTermsLoader.NormalizeLanguage(body.language);
             var now = DateTime.UtcNow;
             var activeLifetime = consentOptions.Value.ActiveLifetime;
-            await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
 
-            var cancelledRequests = await ConsentRequestMaintenance.MarkExpiredActiveRequestsAsync(db, now, activeLifetime, kid, ct);
-            var activeRequests = (await db.ConsentRequests
+            // The new consent supersedes everything: cancel all active consents and
+            // sessions for this kiosk with atomic set-based updates (no transaction,
+            // no range locks — see ConsentRequestMaintenance).
+            await db.ConsentRequests
                 .Where(x => x.Kid == kid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
-                .OrderBy(x => x.Id)
-                .ToListAsync(ct))
-                .Where(x => ConsentRequestMaintenance.IsActive(x.Status))
-                .ToList();
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.Status, ConsentStatus.Cancelled)
+                    .SetProperty(x => x.UpdatedAt, now), ct);
 
-            ConsentRequestMaintenance.MarkCancelled(activeRequests, now);
-            cancelledRequests.AddRange(activeRequests);
-
-            var activeSessions = await db.KioskSessions
+            await db.KioskSessions
                 .Where(s => s.Kid == kid && s.Status == SessionStatus.Active)
-                .OrderByDescending(s => s.Id)
-                .ToListAsync(ct);
-
-            foreach (var session in activeSessions)
-            {
-                session.Status = SessionStatus.Cancelled;
-                session.UpdatedAt = now;
-            }
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.Status, SessionStatus.Cancelled)
+                    .SetProperty(x => x.UpdatedAt, now), ct);
 
             var request = new ConsentRequest
             {
@@ -71,7 +62,6 @@ internal static class ConsentsEndpoints
 
             db.ConsentRequests.Add(request);
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
 
             await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, request.Kid, request.Id, ConsentStatus.Waiting, cancellationToken: ct);
             return Results.Ok(ToConsentDto(request, activeLifetime));
@@ -108,52 +98,42 @@ internal static class ConsentsEndpoints
         {
             if (!TryParseKid(kid, out var parsedKid)) return Results.BadRequest(new { error = "kid must be a positive integer" });
 
-            await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             var now = DateTime.UtcNow;
             var activeLifetime = consentOptions.Value.ActiveLifetime;
-            var cancelledRequests = await ConsentRequestMaintenance.MarkExpiredActiveRequestsAsync(db, now, activeLifetime, parsedKid, ct);
+            var cancelledConsents = await ConsentRequestMaintenance.CancelExpiredActiveRequestsAsync(db, now, activeLifetime, parsedKid, ct);
 
-            var activeRequests = (await db.ConsentRequests
+            var activeRequests = await db.ConsentRequests
+                .AsNoTracking()
                 .Where(x => x.Kid == parsedKid && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
                 .OrderByDescending(x => x.Id)
-                .ToListAsync(ct))
-                .Where(x => ConsentRequestMaintenance.IsActive(x.Status))
-                .ToList();
+                .ToListAsync(ct);
 
             var request = activeRequests.FirstOrDefault();
             var supersededRequests = activeRequests.Skip(1).ToList();
-            ConsentRequestMaintenance.MarkCancelled(supersededRequests, now);
-            cancelledRequests.AddRange(supersededRequests);
-
-            if (request is null)
+            if (supersededRequests.Count > 0)
             {
-                if (cancelledRequests.Count > 0)
-                {
-                    await db.SaveChangesAsync(ct);
-                    await tx.CommitAsync(ct);
-
-                    foreach (var cancelled in cancelledRequests)
-                    {
-                        await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, cancelled, ct);
-                    }
-                }
-
-                return Results.NoContent();
+                var supersededIds = supersededRequests.Select(x => x.Id).ToList();
+                await db.ConsentRequests
+                    .Where(x => supersededIds.Contains(x.Id) && (x.Status == ConsentStatus.Waiting || x.Status == ConsentStatus.Assigned))
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(x => x.Status, ConsentStatus.Cancelled)
+                        .SetProperty(x => x.UpdatedAt, now), ct);
+                cancelledConsents.AddRange(supersededRequests.Select(x => new CancelledConsent(x.Id, x.Kid, x.PdfPath)));
             }
 
-            if (request.Status == ConsentStatus.Waiting)
+            if (request is not null && request.Status == ConsentStatus.Waiting)
             {
+                await db.ConsentRequests
+                    .Where(x => x.Id == request.Id && x.Status == ConsentStatus.Waiting)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(x => x.Status, ConsentStatus.Assigned)
+                        .SetProperty(x => x.UpdatedAt, now), ct);
                 request.Status = ConsentStatus.Assigned;
-                request.UpdatedAt = now;
             }
 
-            if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
+            await ConsentRequestMaintenance.NotifyCancelledAsync(hub, cancelledConsents, ct);
 
-            foreach (var cancelled in cancelledRequests)
-            {
-                await ConsentRequestMaintenance.NotifyConsentChangedAsync(hub, cancelled, ct);
-            }
+            if (request is null) return Results.NoContent();
 
             return Results.Ok(ToConsentDto(request, activeLifetime));
         });

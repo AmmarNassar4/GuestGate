@@ -48,6 +48,36 @@ internal static class GuestFlowEndpoints
             return Results.Content(GuestFormBuilder.BuildGuestFormConfigJson(tplId, t.DataJson, prefill), "application/json");
         });
 
+        // Guest-side cancel: hard-deletes the session identified by its edit token,
+        // together with any guest data already linked to it, then tells the kiosk.
+        // Idempotent: repeating the call (or racing another cancel) returns 204 too.
+        api.MapDelete("/mobile/session", async Task<IResult> (Guid et, AppDb db, IHubContext<GuestHub> hub, CancellationToken ct) =>
+        {
+            if (et == Guid.Empty) return Results.BadRequest(new { error = "et is required" });
+
+            var s = await db.KioskSessions
+                .AsNoTracking()
+                .Where(x => x.EditToken == et)
+                .Select(x => new { x.Id, x.Kid, x.GuestId })
+                .FirstOrDefaultAsync(ct);
+
+            if (s is null) return Results.NoContent();
+
+            await db.KioskSessions
+                .Where(x => x.Id == s.Id)
+                .ExecuteDeleteAsync(ct);
+
+            if (s.GuestId.HasValue)
+            {
+                await db.Guests
+                    .Where(g => g.Id == s.GuestId.Value)
+                    .ExecuteDeleteAsync(ct);
+            }
+
+            await NotifySessionEndedAsync(hub, s.Kid, s.Id, "cancelled");
+            return Results.NoContent();
+        });
+
         api.MapGet("/sessions/{id:int}/result", async Task<IResult> (int id, AppDb db) =>
         {
             var s = await db.KioskSessions.AsNoTracking()
@@ -150,12 +180,18 @@ internal static class GuestFlowEndpoints
 
     private static async Task<bool> ExpireIfNeededAsync(KioskSession session, AppDb db, IHubContext<GuestHub> hub)
     {
-        if (session.ExpiresAt > DateTime.UtcNow) return false;
+        var now = DateTime.UtcNow;
+        if (session.ExpiresAt > now) return false;
 
-        session.Status = SessionStatus.Expired;
-        session.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
-        await NotifySessionEndedAsync(hub, session.Kid, session.Id, "expired");
+        // Conditional atomic update: only this caller (or none, if a concurrent
+        // request already expired/cancelled the row) flips the status and notifies.
+        var expired = await db.KioskSessions
+            .Where(x => x.Id == session.Id && x.Status == SessionStatus.Active)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Status, SessionStatus.Expired)
+                .SetProperty(x => x.UpdatedAt, now));
+
+        if (expired > 0) await NotifySessionEndedAsync(hub, session.Kid, session.Id, "expired");
         return true;
     }
 

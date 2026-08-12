@@ -47,5 +47,14 @@ BEGIN
     ADD [CheckInTime] nvarchar(50) NOT NULL CONSTRAINT [DF_ConsentRequests_CheckInTime] DEFAULT N'';
 END
 ");
+
+        await db.Database.ExecuteSqlRawAsync(@"
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'IX_ConsentRequests_Status_CreatedAt' AND [object_id] = OBJECT_ID(N'[dbo].[ConsentRequests]'))
+BEGIN
+    CREATE INDEX [IX_ConsentRequests_Status_CreatedAt]
+        ON [dbo].[ConsentRequests] ([Status], [CreatedAt])
+        INCLUDE ([Kid], [PdfPath]);
+END
+");
     }
 }
